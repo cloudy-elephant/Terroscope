@@ -19,6 +19,8 @@ static func state_for_side(state: Dictionary, side: String) -> Dictionary:
 		"end_reason": state.end_reason,
 		"map": state.map.duplicate(true),
 	}
+	if state.phase == "GAME_OVER":
+		view.stats = state.get("stats", {}).duplicate(true)
 	if side == "survivors":
 		view.active_actor_id = state.active_actor_id
 		view.acted_survivor_ids = state.acted_survivor_ids.duplicate()

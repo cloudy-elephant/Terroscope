@@ -2,6 +2,7 @@ extends Control
 
 const LanSessionScript = preload("res://network/lan_session.gd")
 const MapBoardScript = preload("res://presentation/map_board.gd")
+const FeedbackControllerScript = preload("res://presentation/feedback_controller.gd")
 
 const PHASE_NAMES := {
 	"SURVIVOR_CHOOSE_ACTOR":"选择幸存者", "SURVIVOR_ACTIVATION":"幸存者行动",
@@ -30,7 +31,12 @@ var confirmation_panel: VBoxContainer
 var confirmation_label: Label
 var log_label: RichTextLabel
 var switch_button: Button
+var tutorial_label: Label
+var tutorial_visible := true
+var feedback
 var pending_command: Dictionary = {}
+var pending_path_selection: Dictionary = {}
+var pending_brutal_selection: Dictionary = {}
 var event_lines: Array[String] = []
 
 
@@ -45,6 +51,8 @@ func _ready() -> void:
 	session.session_status_changed.connect(_set_lobby_status)
 	session.connection_lost.connect(_on_connection_lost)
 	_build_ui()
+	feedback = FeedbackControllerScript.new()
+	add_child(feedback)
 	_show_lobby()
 
 
@@ -127,7 +135,12 @@ func _build_ui() -> void:
 	top_bar.add_child(phase_label)
 	switch_button = _button("切换阵营视图", _switch_debug_side)
 	top_bar.add_child(switch_button)
+	top_bar.add_child(_button("教学提示", _toggle_tutorial))
 	top_bar.add_child(_button("返回大厅", _show_lobby))
+	tutorial_label = Label.new()
+	tutorial_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tutorial_label.add_theme_color_override("font_color", Color("d7c47a"))
+	game_panel.add_child(tutorial_label)
 
 	var body := HBoxContainer.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -135,7 +148,7 @@ func _build_ui() -> void:
 	map_board = MapBoardScript.new()
 	map_board.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	map_board.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	map_board.room_clicked.connect(func(room_id): _set_game_status("地点 %s；请从右侧选择对应行动" % room_id))
+	map_board.room_clicked.connect(_on_room_clicked)
 	body.add_child(map_board)
 	var side_panel := VBoxContainer.new()
 	side_panel.custom_minimum_size.x = 430
@@ -270,6 +283,7 @@ func _render_view(view: Dictionary) -> void:
 	switch_button.visible = session.mode == "offline"
 	map_board.set_view(view)
 	_render_info(view)
+	_render_tutorial(view)
 	_render_actions(view)
 
 
@@ -278,6 +292,8 @@ func _render_info(view: Dictionary) -> void:
 	var killer: Dictionary = view.get("killer", {})
 	lines.append("[b]屠夫[/b]　等级 %d　力量 %d%s" % [int(killer.get("level", 0)), int(killer.get("effective_strength", 0)), "　位置 %s" % killer.room_id if killer.has("room_id") else "　潜行中"])
 	var objectives: Dictionary = view.get("objectives", {})
+	if bool(view.get("firecracker_active", false)):
+		lines.append("[color=#ffd166]爆竹生效：本轮所有地点均视为有噪声[/color]")
 	if session.local_side == "survivors":
 		lines.append("钥匙 %d / 5　无线电 %d / 5　救援 %s" % [view.items.get("team_key_count", 0), objectives.get("radio_progress", 0), str(objectives.get("rescue_countdown", "未启动"))])
 		for survivor: Dictionary in view.get("survivors", []):
@@ -291,13 +307,24 @@ func _render_info(view: Dictionary) -> void:
 			lines.append("%s　%s" % [survivor.id, survivor.health])
 	if not view.get("encounter", {}).is_empty():
 		lines.append("[color=#ffd166]遭遇地点 %s · 已攻击 %s[/color]" % [view.encounter.room_id, str(view.encounter.attacked_survivor_ids)])
+	if view.get("phase", "") == "GAME_OVER":
+		var stats: Dictionary = view.get("stats", {})
+		lines.append("[b]本局统计[/b]　命令 %d　完整轮次 %d　搜索 %d　物品 %d　交换 %d　遭遇 %d　防守 %d 成 / %d 败" % [
+			int(stats.get("commands_accepted", 0)), int(stats.get("rounds_completed", 0)),
+			int(stats.get("searches_completed", 0)), int(stats.get("items_used", 0)),
+			int(stats.get("exchanges_completed", 0)), int(stats.get("encounters_started", 0)),
+			int(stats.get("defenses_succeeded", 0)), int(stats.get("defenses_failed", 0)),
+		])
 	info_label.text = "\n".join(lines)
 
 
 func _render_actions(view: Dictionary) -> void:
 	_clear_container(action_list)
 	pending_command = {}
+	pending_path_selection = {}
+	pending_brutal_selection = {}
 	confirmation_panel.visible = false
+	map_board.clear_selection()
 	var phase: String = view.get("phase", "")
 	if phase == "GAME_OVER":
 		_add_plain_label("%s 获胜：%s" % [view.get("winner", ""), view.get("end_reason", "")])
@@ -343,7 +370,9 @@ func _render_actions(view: Dictionary) -> void:
 		"ENCOUNTER_FLEE":
 			_add_flee_actions(view)
 		"DAMAGE_RESPONSE":
-			_add_command("使用古代护符", "ResolveDamageResponse", {"use_amulet":true})
+			var damaged := _view_survivor(view, view.get("pending_damage", {}).get("current_survivor_id", ""))
+			if not damaged.is_empty() and _inventory_has(view, damaged, "ancient_amulet"):
+				_add_command("使用古代护符", "ResolveDamageResponse", {"use_amulet":true})
 			_add_command("接受伤害", "ResolveDamageResponse", {"use_amulet":false})
 		_:
 			_add_plain_label("主机正在自动结算……")
@@ -355,8 +384,7 @@ func _add_survivor_activation_actions(view: Dictionary) -> void:
 		return
 	if not bool(actor.get("main_action_completed", false)):
 		_add_command("冷静", "Calm", {"actor_id":actor.id})
-		for room_id: String in _legal_neighbors(actor.room_id, view.map.blocked_edge_ids):
-			_add_command("移动到 %s" % room_id, "MoveSurvivor", {"actor_id":actor.id,"path_room_ids":[room_id]})
+		_add_path_builder("移动（1～2 步）", "MoveSurvivor", {"actor_id":actor.id}, actor.room_id, 2, view.map.blocked_edge_ids)
 		for edge_id: String in view.map.blocked_edge_ids:
 			if edge_id in map_board.blockable_edges_touching(actor.room_id):
 				_add_command("拆除封锁 %s" % edge_id, "RemoveBlock", {"actor_id":actor.id,"edge_id":edge_id})
@@ -365,16 +393,27 @@ func _add_survivor_activation_actions(view: Dictionary) -> void:
 		if actor.room_id in ["R1", "B1", "G5"]:
 			_add_command("搜索", "BeginSearch", {"actor_id":actor.id})
 		_add_special_actions(view, actor)
+	_add_extra_item_actions(view, actor)
+	_add_exchange_actions(view, actor)
 	if bool(actor.get("main_action_completed", false)):
 		_add_command("结束 %s 的激活" % actor.id, "EndActivation", {"actor_id":actor.id})
 
 
 func _add_special_actions(view: Dictionary, actor: Dictionary) -> void:
+	if actor.id == "marco_carven":
+		for card_id: String in view.items.discard:
+			if view.items.item_instances.get(card_id, "") in ["adrenaline", "sedatives"]:
+				for option: Dictionary in _acquisition_payloads(view, actor.id, card_id, {"actor_id":actor.id,"source_id":"marco_equipped","card_instance_id":card_id}):
+					_add_command("装备齐全：取回 %s%s" % [_item_name(view, card_id), option.suffix], "UseSpecialAction", option.payload)
+	if actor.id == "william_hooper":
+		_add_path_builder("冲刺（1～3 步）", "UseSpecialAction", {"actor_id":actor.id,"source_id":"william_sprint"}, actor.room_id, 3, view.map.blocked_edge_ids)
+	if actor.room_id == "B4" and _inventory_has(view, actor, "toolbox"):
+		_add_command("使用工具箱维修 +2", "UseSpecialAction", {"actor_id":actor.id,"source_id":"toolbox"})
 	if actor.id == "marco_carven" and _inventory_has(view, actor, "marco_medical_kit"):
 		for target: Dictionary in view.survivors:
 			if target.health == "injured":
 				_add_command("医疗包治疗 %s" % target.id, "UseSpecialAction", {"actor_id":actor.id,"source_id":"marco_medical_kit","target_survivor_id":target.id})
-	if _inventory_has(view, actor, "trap_parts"):
+	if _inventory_has(view, actor, "trap_parts") and view.map.get("trap_room_id", "").is_empty():
 		_add_command("在 %s 放置陷阱" % actor.room_id, "UseSpecialAction", {"actor_id":actor.id,"source_id":"trap_parts"})
 	if actor.room_id == "G3" and bool(view.map.get("first_aid_cabinet_available", false)):
 		for target: Dictionary in view.survivors:
@@ -382,17 +421,68 @@ func _add_special_actions(view: Dictionary, actor: Dictionary) -> void:
 				_add_command("急救柜治疗 %s" % target.id, "UseSpecialAction", {"actor_id":actor.id,"source_id":"g3_first_aid_cabinet","target_survivor_id":target.id})
 
 
+func _add_extra_item_actions(view: Dictionary, actor: Dictionary) -> void:
+	for card_id: String in actor.inventory_instance_ids:
+		var definition_id: String = view.items.item_instances.get(card_id, "")
+		match definition_id:
+			"sedatives":
+				if int(actor.fear) > 0:
+					_add_command("额外行动：使用镇静剂", "UseItem", {"actor_id":actor.id,"card_instance_id":card_id})
+			"firecracker":
+				if not bool(view.get("firecracker_active", false)):
+					_add_command("额外行动：点燃爆竹", "UseItem", {"actor_id":actor.id,"card_instance_id":card_id})
+			"hatchet":
+				for edge_id: String in view.map.blocked_edge_ids:
+					if edge_id in map_board.blockable_edges_touching(actor.room_id):
+						_add_command("额外行动：手斧拆除 %s" % edge_id, "UseItem", {"actor_id":actor.id,"card_instance_id":card_id,"edge_id":edge_id})
+			"whiskey_bottle":
+				for room_id: String in map_board.neighbors(actor.room_id):
+					_add_command("额外行动：向 %s 投掷酒瓶" % room_id, "UseItem", {"actor_id":actor.id,"card_instance_id":card_id,"target_room_id":room_id})
+			"adrenaline":
+				_add_path_builder("额外行动：肾上腺素（1～4 步）", "UseItem", {"actor_id":actor.id,"card_instance_id":card_id}, actor.room_id, 4, view.map.blocked_edge_ids)
+
+
+func _add_exchange_actions(view: Dictionary, actor: Dictionary) -> void:
+	var limit: int = int(view.items.inventory_limit)
+	for target: Dictionary in view.survivors:
+		if target.id == actor.id or target.health == "eliminated" or target.room_id != actor.room_id:
+			continue
+		if target.inventory_instance_ids.size() < limit:
+			for card_id: String in actor.inventory_instance_ids:
+				var actor_final: Array = actor.inventory_instance_ids.duplicate()
+				var target_final: Array = target.inventory_instance_ids.duplicate()
+				actor_final.erase(card_id)
+				target_final.append(card_id)
+				_add_command("交给 %s：%s" % [target.id, _item_name(view, card_id)], "ExchangeItems", {"actor_id":actor.id,"target_survivor_id":target.id,"actor_inventory_instance_ids":actor_final,"target_inventory_instance_ids":target_final})
+		if actor.inventory_instance_ids.size() < limit:
+			for card_id: String in target.inventory_instance_ids:
+				var actor_final: Array = actor.inventory_instance_ids.duplicate()
+				var target_final: Array = target.inventory_instance_ids.duplicate()
+				target_final.erase(card_id)
+				actor_final.append(card_id)
+				_add_command("从 %s 接收：%s" % [target.id, _item_name(view, card_id)], "ExchangeItems", {"actor_id":actor.id,"target_survivor_id":target.id,"actor_inventory_instance_ids":actor_final,"target_inventory_instance_ids":target_final})
+		for actor_card: String in actor.inventory_instance_ids:
+			for target_card: String in target.inventory_instance_ids:
+				var actor_final: Array = actor.inventory_instance_ids.duplicate()
+				var target_final: Array = target.inventory_instance_ids.duplicate()
+				actor_final[actor_final.find(actor_card)] = target_card
+				target_final[target_final.find(target_card)] = actor_card
+				_add_command("与 %s 交换：%s ↔ %s" % [target.id, _item_name(view, actor_card), _item_name(view, target_card)], "ExchangeItems", {"actor_id":actor.id,"target_survivor_id":target.id,"actor_inventory_instance_ids":actor_final,"target_inventory_instance_ids":target_final})
+
+
 func _add_search_resolution_actions(view: Dictionary) -> void:
 	var pending: Dictionary = view.items.pending_private_draw
 	var card_id: String = pending.card_instance_ids[0]
-	_add_command("获得 %s" % _item_name(view, card_id), "ResolveSearchItem", _acquisition_payload(view, pending.survivor_id, card_id, {"take":true}))
+	for option: Dictionary in _acquisition_payloads(view, pending.survivor_id, card_id, {"take":true}):
+		_add_command("获得 %s%s" % [_item_name(view, card_id), option.suffix], "ResolveSearchItem", option.payload)
 	_add_command("弃置 %s" % _item_name(view, card_id), "ResolveSearchItem", {"take":false})
 
 
 func _add_discover_resolution_actions(view: Dictionary) -> void:
 	var pending: Dictionary = view.items.pending_private_draw
 	for card_id: String in pending.card_instance_ids:
-		_add_command("保留 %s" % _item_name(view, card_id), "ResolveDiscover", _acquisition_payload(view, pending.survivor_id, card_id, {"keep_card_instance_id":card_id}))
+		for option: Dictionary in _acquisition_payloads(view, pending.survivor_id, card_id, {"keep_card_instance_id":card_id}):
+			_add_command("保留 %s%s" % [_item_name(view, card_id), option.suffix], "ResolveDiscover", option.payload)
 
 
 func _add_killer_main_actions(view: Dictionary) -> void:
@@ -427,23 +517,26 @@ func _add_killer_skill_actions(view: Dictionary, timing: String) -> void:
 					_add_command("追逐到 %s" % room_id, "UseKillerSkill", payload)
 			"madness":
 				for edge_id: String in map_board.all_blockable_edges():
-					var payload := base_payload.duplicate()
-					payload.edge_id = edge_id
-					payload.merge(_automatic_relocation(view, [edge_id]))
-					_add_command("疯狂：封锁 %s" % edge_id, "UseKillerSkill", payload)
+					for relocations: Array in _relocation_options(view, [edge_id]):
+						var payload := base_payload.duplicate()
+						payload.edge_id = edge_id
+						payload.relocate_edge_ids = relocations
+						_add_command("疯狂：封锁 %s%s" % [edge_id, _relocation_suffix(relocations)], "UseKillerSkill", payload)
 			"barricade":
 				for edge_id: String in map_board.blockable_edges_touching(view.killer.room_id):
-					var payload := base_payload.duplicate()
-					payload.edge_id = edge_id
-					payload.merge(_automatic_relocation(view, [edge_id]))
-					_add_command("路障：%s" % edge_id, "UseKillerSkill", payload)
+					for relocations: Array in _relocation_options(view, [edge_id]):
+						var payload := base_payload.duplicate()
+						payload.edge_id = edge_id
+						payload.relocate_edge_ids = relocations
+						_add_command("路障：%s%s" % [edge_id, _relocation_suffix(relocations)], "UseKillerSkill", payload)
 			"stayyyy":
-				var costs := _other_hand_cards(view, instance_id, 4)
-				if costs.size() == 4:
-					var payload := base_payload.duplicate()
-					payload.cost_card_instance_ids = costs
-					payload.merge(_automatic_relocation(view, map_board.blockable_edges_touching(view.killer.room_id)))
-					_add_command("留下！！封锁当前地点全部门", "UseKillerSkill", payload)
+				for costs: Array in _other_hand_card_choices(view, instance_id, 4):
+					var targets: Array = map_board.blockable_edges_touching(view.killer.room_id)
+					for relocations: Array in _relocation_options(view, targets):
+						var payload := base_payload.duplicate()
+						payload.cost_card_instance_ids = costs
+						payload.relocate_edge_ids = relocations
+						_add_command("留下！！封锁当前地点全部门%s" % _relocation_suffix(relocations), "UseKillerSkill", payload)
 			"revving_chainsaw":
 				var stay_payload := base_payload.duplicate()
 				stay_payload.path_room_ids = []
@@ -453,13 +546,9 @@ func _add_killer_skill_actions(view: Dictionary, timing: String) -> void:
 					payload.path_room_ids = [room_id]
 					_add_command("链锯轰鸣：移动到 %s" % room_id, "UseKillerSkill", payload)
 			"brutal_rage":
-				var costs := _other_hand_cards(view, instance_id, 1)
-				if costs.size() == 1:
-					for room_id: String in map_board.neighbors(view.killer.room_id):
-						var payload := base_payload.duplicate()
-						payload.cost_card_instance_ids = costs
-						payload.path_segments = [[room_id]]
-						_add_command("残酷暴怒到 %s" % room_id, "UseKillerSkill", payload)
+				for costs: Array in _other_hand_card_choices(view, instance_id, 1):
+					var cost_name := _killer_card_name(view, costs[0])
+					action_list.add_child(_button("残酷暴怒（弃置 %s）：选择路径" % cost_name, Callable(self, "_start_brutal_selection").bind(instance_id, costs.duplicate(), view.duplicate(true))))
 
 
 func _add_defense_item_actions(view: Dictionary) -> void:
@@ -502,6 +591,85 @@ func _add_command(label: String, command_type: String, payload: Dictionary) -> v
 	action_list.add_child(_button(label, func(): _queue_command(label, command_type, payload)))
 
 
+func _add_path_builder(label: String, command_type: String, payload: Dictionary, start_room_id: String, maximum_steps: int, blocked_edges: Array) -> void:
+	action_list.add_child(_button("%s：选择路径" % label, Callable(self, "_start_path_selection").bind(
+		label, command_type, payload.duplicate(true), start_room_id, maximum_steps, blocked_edges.duplicate()
+	)))
+
+
+func _start_path_selection(label: String, command_type: String, payload: Dictionary, start_room_id: String, maximum_steps: int, blocked_edges: Array) -> void:
+	pending_path_selection = {
+		"label":label,
+		"command_type":command_type,
+		"payload":payload.duplicate(true),
+		"start_room_id":start_room_id,
+		"current_room_id":start_room_id,
+		"maximum_steps":maximum_steps,
+		"blocked_edge_ids":blocked_edges.duplicate(),
+		"path_room_ids":[],
+	}
+	_render_path_selection()
+
+
+func _render_path_selection() -> void:
+	_clear_container(action_list)
+	var path: Array = pending_path_selection.path_room_ids
+	var current_room_id: String = pending_path_selection.current_room_id
+	var legal_rooms := _legal_neighbors(current_room_id, pending_path_selection.blocked_edge_ids)
+	map_board.set_selection(legal_rooms, path)
+	_add_plain_label("%s\n当前路径：%s" % [pending_path_selection.label, " → ".join(path) if not path.is_empty() else "尚未移动"])
+	if path.size() < int(pending_path_selection.maximum_steps):
+		for room_id: String in legal_rooms:
+			action_list.add_child(_button("下一步：%s" % room_id, Callable(self, "_append_path_room").bind(room_id)))
+	if not path.is_empty():
+		action_list.add_child(_button("完成路径", _finish_path_selection))
+		action_list.add_child(_button("撤回上一步", _undo_path_step))
+	action_list.add_child(_button("取消路径选择", _cancel_path_selection))
+
+
+func _append_path_room(room_id: String) -> void:
+	if pending_path_selection.is_empty():
+		return
+	if room_id not in _legal_neighbors(pending_path_selection.current_room_id, pending_path_selection.blocked_edge_ids):
+		return
+	pending_path_selection.path_room_ids.append(room_id)
+	pending_path_selection.current_room_id = room_id
+	_render_path_selection()
+
+
+func _undo_path_step() -> void:
+	if pending_path_selection.is_empty() or pending_path_selection.path_room_ids.is_empty():
+		return
+	pending_path_selection.path_room_ids.pop_back()
+	pending_path_selection.current_room_id = pending_path_selection.start_room_id if pending_path_selection.path_room_ids.is_empty() else pending_path_selection.path_room_ids.back()
+	_render_path_selection()
+
+
+func _finish_path_selection() -> void:
+	if pending_path_selection.is_empty() or pending_path_selection.path_room_ids.is_empty():
+		return
+	var selection := pending_path_selection.duplicate(true)
+	var payload: Dictionary = selection.payload
+	payload.path_room_ids = selection.path_room_ids
+	var label := "%s：%s" % [selection.label, " → ".join(selection.path_room_ids)]
+	pending_path_selection = {}
+	_render_actions(session.current_view)
+	_queue_command(label, selection.command_type, payload)
+
+
+func _cancel_path_selection() -> void:
+	pending_path_selection = {}
+	map_board.clear_selection()
+	_render_actions(session.current_view)
+
+
+func _on_room_clicked(room_id: String) -> void:
+	if not pending_path_selection.is_empty():
+		_append_path_room(room_id)
+		return
+	_set_game_status("地点 %s；请从右侧选择对应行动" % room_id)
+
+
 func _queue_command(label: String, command_type: String, payload: Dictionary) -> void:
 	pending_command = {"type":command_type,"payload":payload.duplicate(true),"label":label}
 	confirmation_label.text = "待提交：%s\n确认后由主机验证并结算，接受后不可撤销。" % label
@@ -529,41 +697,154 @@ func _switch_debug_side() -> void:
 	session.set_debug_side(target)
 
 
-func _acquisition_payload(view: Dictionary, survivor_id: String, card_id: String, initial: Dictionary) -> Dictionary:
-	var payload := initial.duplicate(true)
+func _acquisition_payloads(view: Dictionary, survivor_id: String, card_id: String, initial: Dictionary) -> Array:
 	if view.items.item_instances.get(card_id, "") == "key":
-		return payload
+		return [{"payload":initial.duplicate(true),"suffix":""}]
 	var survivor := _view_survivor(view, survivor_id)
 	var candidates: Array = survivor.inventory_instance_ids.duplicate()
 	candidates.append(card_id)
-	if candidates.size() > int(view.items.inventory_limit):
-		var kept: Array = survivor.inventory_instance_ids.slice(0, int(view.items.inventory_limit) - 1)
-		kept.append(card_id)
+	var limit: int = int(view.items.inventory_limit)
+	if candidates.size() <= limit:
+		return [{"payload":initial.duplicate(true),"suffix":""}]
+	var combinations: Array = []
+	_collect_combinations(candidates, limit, 0, [], combinations)
+	var result: Array = []
+	for kept: Array in combinations:
+		var payload := initial.duplicate(true)
 		payload.keep_inventory_instance_ids = kept
-	return payload
+		var names: Array[String] = []
+		for instance_id: String in kept:
+			names.append(_item_name(view, instance_id))
+		result.append({"payload":payload,"suffix":"（最终保留：%s）" % "、".join(names)})
+	return result
 
 
-func _automatic_relocation(view: Dictionary, target_edges: Array) -> Dictionary:
+func _collect_combinations(values: Array, count: int, start_index: int, current: Array, output: Array) -> void:
+	if current.size() == count:
+		output.append(current.duplicate())
+		return
+	for index in range(start_index, values.size()):
+		var next := current.duplicate()
+		next.append(values[index])
+		_collect_combinations(values, count, index + 1, next, output)
+
+
+func _relocation_options(view: Dictionary, target_edges: Array) -> Array:
 	var new_count := 0
 	for edge_id: String in target_edges:
 		if edge_id not in view.map.blocked_edge_ids:
 			new_count += 1
 	var shortage: int = maxi(0, new_count - int(view.map.block_supply_remaining))
-	var relocations: Array = []
+	var candidates: Array = []
 	for edge_id: String in view.map.blocked_edge_ids:
-		if edge_id not in target_edges and relocations.size() < shortage:
-			relocations.append(edge_id)
-	return {"relocate_edge_ids":relocations}
-
-
-func _other_hand_cards(view: Dictionary, excluded_id: String, count: int) -> Array:
+		if edge_id not in target_edges:
+			candidates.append(edge_id)
+	if shortage == 0:
+		return [[]]
+	if candidates.size() < shortage:
+		return []
 	var result: Array = []
+	_collect_combinations(candidates, shortage, 0, [], result)
+	return result
+
+
+func _other_hand_card_choices(view: Dictionary, excluded_id: String, count: int) -> Array:
+	var candidates: Array = []
 	for instance_id: String in view.killer.hand:
 		if instance_id != excluded_id:
-			result.append(instance_id)
-			if result.size() == count:
-				break
+			candidates.append(instance_id)
+	if candidates.size() < count:
+		return []
+	var result: Array = []
+	_collect_combinations(candidates, count, 0, [], result)
 	return result
+
+
+func _relocation_suffix(relocations: Array) -> String:
+	return "" if relocations.is_empty() else "（转移 %s）" % "、".join(relocations)
+
+
+func _start_brutal_selection(card_instance_id: String, cost_ids: Array, view: Dictionary) -> void:
+	pending_brutal_selection = {
+		"card_instance_id":card_instance_id,
+		"cost_card_instance_ids":cost_ids.duplicate(),
+		"segments":[],
+		"current_room_id":view.killer.room_id,
+		"remaining_blocked_edge_ids":view.map.blocked_edge_ids.duplicate(),
+	}
+	_render_brutal_selection()
+
+
+func _render_brutal_selection() -> void:
+	_clear_container(action_list)
+	var segments: Array = pending_brutal_selection.segments
+	_add_plain_label("残酷暴怒路径：%s" % (_segments_label(segments) if not segments.is_empty() else "尚未选择"))
+	for path: Array in _all_paths(pending_brutal_selection.current_room_id, 2):
+		action_list.add_child(_button("添加移动段：%s" % " → ".join(path), Callable(self, "_append_brutal_segment").bind(path.duplicate())))
+	if not segments.is_empty():
+		action_list.add_child(_button("完成路径选择", _finish_brutal_selection))
+	action_list.add_child(_button("取消残酷暴怒", _cancel_brutal_selection))
+
+
+func _append_brutal_segment(path: Array) -> void:
+	var remaining: Array = pending_brutal_selection.remaining_blocked_edge_ids
+	var room_id: String = pending_brutal_selection.current_room_id
+	var removed_block := false
+	for target_room_id: String in path:
+		var crossed_edge: String = map_board.edge_id(room_id, target_room_id)
+		if crossed_edge in remaining:
+			remaining.erase(crossed_edge)
+			removed_block = true
+		room_id = target_room_id
+	pending_brutal_selection.segments.append(path.duplicate())
+	pending_brutal_selection.current_room_id = room_id
+	if not removed_block or pending_brutal_selection.segments.size() >= 8:
+		_finish_brutal_selection()
+	else:
+		_render_brutal_selection()
+
+
+func _finish_brutal_selection() -> void:
+	if pending_brutal_selection.is_empty() or pending_brutal_selection.segments.is_empty():
+		return
+	var selection := pending_brutal_selection.duplicate(true)
+	var label := "残酷暴怒：%s" % _segments_label(selection.segments)
+	pending_brutal_selection = {}
+	_render_actions(session.current_view)
+	_queue_command(label, "UseKillerSkill", {
+		"card_instance_id":selection.card_instance_id,
+		"cost_card_instance_ids":selection.cost_card_instance_ids,
+		"path_segments":selection.segments,
+	})
+
+
+func _cancel_brutal_selection() -> void:
+	pending_brutal_selection = {}
+	map_board.clear_selection()
+	_render_actions(session.current_view)
+
+
+func _all_paths(start_room_id: String, maximum_steps: int) -> Array:
+	var paths: Array = []
+	_extend_all_paths(start_room_id, maximum_steps, [], paths)
+	return paths
+
+
+func _extend_all_paths(current_room_id: String, maximum_steps: int, current_path: Array, paths: Array) -> void:
+	if current_path.size() >= maximum_steps:
+		return
+	for neighbor: String in map_board.neighbors(current_room_id):
+		var next_path := current_path.duplicate()
+		next_path.append(neighbor)
+		paths.append(next_path)
+		_extend_all_paths(neighbor, maximum_steps, next_path, paths)
+
+
+func _segments_label(segments: Array) -> String:
+	var labels: Array[String] = []
+	for segment: Array in segments:
+		labels.append(" → ".join(segment))
+	return " / ".join(labels)
 
 
 func _legal_neighbors(room_id: String, blocked_edges: Array) -> Array:
@@ -605,6 +886,38 @@ func _append_events(events: Array) -> void:
 		event_lines.pop_front()
 	log_label.text = "\n".join(event_lines)
 	log_label.scroll_to_line(maxi(0, event_lines.size() - 1))
+	if feedback != null:
+		feedback.present(events, map_board)
+
+
+func _toggle_tutorial() -> void:
+	tutorial_visible = not tutorial_visible
+	if not session.current_view.is_empty():
+		_render_tutorial(session.current_view)
+
+
+func _render_tutorial(view: Dictionary) -> void:
+	tutorial_label.visible = tutorial_visible
+	if not tutorial_visible:
+		return
+	var phase: String = view.get("phase", "")
+	var tips := {
+		"SURVIVOR_CHOOSE_ACTOR":"先选一名本轮尚未行动的幸存者；三人顺序可自由决定。",
+		"SURVIVOR_ACTIVATION":"完成恰好一个主要行动；额外物品与同房交换可在主要行动前后使用，最后结束激活。",
+		"SURVIVOR_SEARCH_RESOLVE":"抽牌已经发生；选择获得或弃置。超出 3 件时明确选择最终保留物品。",
+		"SURVIVOR_DISCOVER_SELECT":"三人行动后选一名发现者；他会抽 2 张并保留 1 张。",
+		"SURVIVOR_DISCOVER_RESOLVE":"抽牌已经发生；选定保留牌并处理容量，另一张自动弃置。",
+		"KILLER_FAST":"可打出快速技能，也可以结束阶段。根据上一轮公开噪声推断幸存者路线。",
+		"KILLER_MAIN":"执行两次移动或搜索，或用一张主要技能替代；搜索命中立即进入遭遇。",
+		"KILLER_SLOW":"可打出一张合法慢速技能；结束后抽牌并开始下一轮。",
+		"ENCOUNTER_ATTACK_SKILL":"屠夫选择攻击技能或跳过。",
+		"ENCOUNTER_DEFENDER":"幸存者选择一名尚未防守的同房角色。",
+		"ENCOUNTER_ITEM":"选择至多一件防御物品；左轮手枪可额外搭配一份弹药。",
+		"ENCOUNTER_FLEE":"每名存活参与者确认留在原地或移动一步。",
+		"DAMAGE_RESPONSE":"若持有古代护符可弃置并防止本次伤害，否则接受伤害。",
+		"GAME_OVER":"对局已结束；查看统计后可快速重开。",
+	}
+	tutorial_label.text = "提示：%s" % tips.get(phase, "主机正在自动结算，请等待阶段推进。")
 
 
 func _add_plain_label(text: String) -> void:

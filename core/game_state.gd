@@ -4,8 +4,8 @@ extends RefCounted
 const SeededRngScript = preload("res://core/seeded_rng.gd")
 
 const RULES_VERSION := "0.1.0"
-const CONTENT_VERSION := "0.4.0"
-const SCHEMA_VERSION := "0.4.0"
+const CONTENT_VERSION := "0.5.0"
+const SCHEMA_VERSION := "0.5.0"
 
 var data: Dictionary
 
@@ -138,6 +138,17 @@ func initialize(
 		"firecracker_active": false,
 		"encounter": {},
 		"pending_damage": {},
+		"stats": {
+			"commands_accepted":0,
+			"rounds_completed":0,
+			"searches_completed":0,
+			"items_used":0,
+			"exchanges_completed":0,
+			"killer_skills_played":0,
+			"encounters_started":0,
+			"defenses_succeeded":0,
+			"defenses_failed":0,
+		},
 		"processed_commands": {},
 		"winner": "",
 		"end_reason": "",

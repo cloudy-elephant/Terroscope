@@ -1,14 +1,14 @@
 # Terrorscape: The Laboratory
 
-这是依据项目内已确认规格建立的 Godot 4 游戏工程。当前已完成 Milestone 0～4：实验室地图、权威规则、完整对局、双方脱敏界面，以及可靠有序、主机权威的局域网双人联机。
+这是依据项目内已确认规格建立的 Godot 4 游戏工程。Milestone 0～5 已全部完成：实验室地图、38 张确认牌、固定角色与屠夫、完整权威规则、双方脱敏界面、局域网双人联机，以及教学提示、反馈、统计和快速重开。
 
-## 运行沙盒
+## 启动游戏
 
 ```powershell
-& 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --headless --path .
+& 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --path .
 ```
 
-沙盒会用固定种子运行一轮最小命令序列，输出文本事件和最终状态摘要，然后退出。
+两台电脑连接同一局域网后，一方创建房间并把界面显示的 IP 和端口告诉另一方；双方准备后由房主开始。单机检查可选择“本机双视图调试”。
 
 ## 运行 Milestone 0 验收
 
@@ -49,3 +49,11 @@
 ```
 
 测试覆盖大厅版本握手、双方准备、可靠有序 TCP 帧、真实回环连接、客户端只提交命令、主机权威结算、双方脱敏快照、断线暂停、本地双视图，以及选择后取消不改变权威状态。
+
+## 运行 Milestone 5 验收
+
+```powershell
+& 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --headless --path . --script res://tests/run_milestone_5.gd
+```
+
+测试覆盖 38 张确认牌的数量、全部主动道具、工具箱、马尔科“装备齐全”、威廉“冲刺”、完整物品交换、终局统计、新手提示、声音与动画反馈，以及快速重开。Milestone 0～5 当前共 840 项自动断言。

@@ -52,6 +52,7 @@ func submit(state, command: Dictionary) -> Dictionary:
 
 	draft.rng_state = rng.snapshot()
 	draft.command_sequence += 1
+	draft.stats.commands_accepted = int(draft.stats.get("commands_accepted", 0)) + 1
 	events.push_front(DomainEventScript.make("CommandAccepted", {"command_id":command_id,"command_sequence":draft.command_sequence}))
 	var stamped_events := _stamp_events(draft, events)
 	var result := {
@@ -83,6 +84,10 @@ func _apply_command(draft: Dictionary, command: Dictionary, rng, events: Array) 
 			return _begin_search(draft, command.player_id, payload, events)
 		"ResolveSearchItem":
 			return _resolve_search_item(draft, command.player_id, payload, events)
+		"UseItem":
+			return _use_item(draft, command.player_id, payload, events)
+		"ExchangeItems":
+			return _exchange_items(draft, command.player_id, payload, events)
 		"UseSpecialAction":
 			return _use_special_action(draft, command.player_id, payload, events)
 		"EndActivation":
@@ -187,7 +192,7 @@ func _remove_block(draft: Dictionary, player_id: String, payload: Dictionary, ev
 	draft.map.blocked_edge_ids.erase(edge_id)
 	draft.map.block_supply_remaining += 1
 	survivor.main_action_completed = true
-	events.append(DomainEventScript.make("BlockRemoved", {"edge_id":edge_id,"actor_id":survivor.id}))
+	events.append(DomainEventScript.make("BlockRemoved", {"edge_id":edge_id}))
 	return _valid()
 
 
@@ -230,6 +235,7 @@ func _begin_search(draft: Dictionary, player_id: String, payload: Dictionary, ev
 	var card_instance_id: String = draft.items.search_deck.pop_front()
 	draft.items.pending_private_draw = {"source":"search","survivor_id":survivor.id,"card_instance_ids":[card_instance_id]}
 	survivor.main_action_completed = true
+	draft.stats.searches_completed = int(draft.stats.get("searches_completed", 0)) + 1
 	if survivor.id != "anna_kubrick":
 		_record_noise(draft, survivor.room_id, "search_action", false, events)
 	_record_draw_noise(draft, survivor, [card_instance_id], events)
@@ -260,12 +266,172 @@ func _resolve_search_item(draft: Dictionary, player_id: String, payload: Diction
 	return _valid()
 
 
+func _use_item(draft: Dictionary, player_id: String, payload: Dictionary, events: Array) -> Dictionary:
+	var check := _active_survivor(draft, player_id, payload.get("actor_id", ""))
+	if not check.ok:
+		return check
+	var actor: Dictionary = check.survivor
+	var card_instance_id: String = payload.get("card_instance_id", "")
+	if card_instance_id not in actor.inventory_instance_ids:
+		return _invalid("RESOURCE_MISSING", "Selected item is not in the active survivor inventory")
+	var definition_id: String = draft.items.item_instances.get(card_instance_id, "")
+	match definition_id:
+		"sedatives":
+			if int(actor.fear) <= 0:
+				return _invalid("PREREQUISITE_MISSING", "Sedatives require at least one fear")
+			var old_fear: int = actor.fear
+			_consume_item(draft, actor, card_instance_id, "sedatives", events)
+			actor.fear = 0
+			events.append(DomainEventScript.make("FearChanged", {"survivor_id":actor.id,"from":old_fear,"to":0}, "survivors"))
+		"firecracker":
+			if draft.firecracker_active:
+				return _invalid("PREREQUISITE_MISSING", "A firecracker is already active this round")
+			_consume_item(draft, actor, card_instance_id, "firecracker", events)
+			draft.firecracker_active = true
+			events.append(DomainEventScript.make("FirecrackerActivated", {"active":true}))
+		"hatchet":
+			var edge_id: String = payload.get("edge_id", "")
+			if edge_id not in draft.map.blocked_edge_ids or not _edge_touches_room(edge_id, actor.room_id):
+				return _invalid("TARGET_ILLEGAL", "Hatchet target must be an adjacent blocked door")
+			_consume_item(draft, actor, card_instance_id, "hatchet_remove_block", events)
+			draft.map.blocked_edge_ids.erase(edge_id)
+			draft.map.block_supply_remaining += 1
+			events.append(DomainEventScript.make("BlockRemoved", {"edge_id":edge_id,"source":"hatchet"}))
+		"whiskey_bottle":
+			var target_room_id: String = payload.get("target_room_id", "")
+			if not map_graph.is_adjacent(actor.room_id, target_room_id):
+				return _invalid("TARGET_ILLEGAL", "Whiskey target must be an adjacent room")
+			_consume_item(draft, actor, card_instance_id, "whiskey_bottle", events)
+			_record_noise(draft, target_room_id, "whiskey_bottle", false, events)
+		"adrenaline":
+			var path_value: Variant = payload.get("path_room_ids", [])
+			if not path_value is Array:
+				return _invalid("PATH_ILLEGAL", "Adrenaline path must be an array")
+			var path: Array = path_value
+			if path.size() < 1 or path.size() > 4:
+				return _invalid("PATH_ILLEGAL", "Adrenaline movement requires one to four steps")
+			var path_check: Dictionary = map_graph.validate_path(actor.room_id, path, draft.map.blocked_edge_ids)
+			if not path_check.ok:
+				return _invalid("PATH_ILLEGAL", path_check.reason)
+			_consume_item(draft, actor, card_instance_id, "adrenaline", events)
+			for next_value: Variant in path:
+				var source_room_id: String = actor.room_id
+				var next_room_id := str(next_value)
+				actor.room_id = next_room_id
+				events.append(DomainEventScript.make("ActorMoved", {"actor_id":actor.id,"from":source_room_id,"to":next_room_id,"source":"adrenaline"}, "survivors"))
+				if next_room_id == "R4":
+					_record_noise(draft, next_room_id, "sterile_room_entry", false, events)
+		_:
+			return _invalid("TARGET_ILLEGAL", "Selected item has no extra-action effect")
+	draft.stats.items_used = int(draft.stats.get("items_used", 0)) + 1
+	return _valid()
+
+
+func _exchange_items(draft: Dictionary, player_id: String, payload: Dictionary, events: Array) -> Dictionary:
+	var check := _active_survivor(draft, player_id, payload.get("actor_id", ""))
+	if not check.ok:
+		return check
+	var actor: Dictionary = check.survivor
+	var target := _survivor_by_id(draft, payload.get("target_survivor_id", ""))
+	if target.is_empty() or target.id == actor.id or target.health == "eliminated":
+		return _invalid("TARGET_ILLEGAL", "Exchange target must be another living survivor")
+	if target.controller_player_id != player_id:
+		return _invalid("NOT_CONTROLLER", "Player does not control the exchange target")
+	if target.room_id != actor.room_id:
+		return _invalid("TARGET_ILLEGAL", "Survivors must share a room to exchange items")
+	var actor_value: Variant = payload.get("actor_inventory_instance_ids", null)
+	var target_value: Variant = payload.get("target_inventory_instance_ids", null)
+	if not actor_value is Array or not target_value is Array:
+		return _invalid("TARGET_REQUIRED", "Exchange requires both complete final inventories")
+	var actor_final: Array = actor_value.duplicate()
+	var target_final: Array = target_value.duplicate()
+	var limit: int = int(draft.items.inventory_limit)
+	if actor_final.size() > limit or target_final.size() > limit:
+		return _invalid("CAPACITY_RESULT_INVALID", "Exchange exceeds an inventory limit")
+	var available: Array = actor.inventory_instance_ids.duplicate()
+	available.append_array(target.inventory_instance_ids)
+	var proposed: Array = actor_final.duplicate()
+	proposed.append_array(target_final)
+	if proposed.size() != available.size():
+		return _invalid("CAPACITY_RESULT_INVALID", "Exchange must assign every existing item exactly once")
+	var seen: Dictionary = {}
+	for value: Variant in proposed:
+		var instance_id := str(value)
+		if instance_id not in available or seen.has(instance_id):
+			return _invalid("CAPACITY_RESULT_INVALID", "Exchange contains an unavailable or duplicate item")
+		seen[instance_id] = true
+	actor.inventory_instance_ids = actor_final
+	target.inventory_instance_ids = target_final
+	draft.stats.exchanges_completed = int(draft.stats.get("exchanges_completed", 0)) + 1
+	events.append(DomainEventScript.make("ItemsExchanged", {"actor_id":actor.id,"target_survivor_id":target.id,"actor_inventory_instance_ids":actor_final,"target_inventory_instance_ids":target_final}, "survivors"))
+	return _valid()
+
+
 func _use_special_action(draft: Dictionary, player_id: String, payload: Dictionary, events: Array) -> Dictionary:
 	var check := _main_action_check(draft, player_id, payload.get("actor_id", ""))
 	if not check.ok:
 		return check
 	var actor: Dictionary = check.survivor
 	var source_id: String = payload.get("source_id", "")
+	if source_id == "marco_equipped":
+		if actor.id != "marco_carven":
+			return _invalid("TARGET_ILLEGAL", "Only Marco can use Equipped")
+		var card_instance_id: String = payload.get("card_instance_id", "")
+		if card_instance_id not in draft.items.discard:
+			return _invalid("RESOURCE_MISSING", "Selected item is not in the item discard")
+		if draft.items.item_instances.get(card_instance_id, "") not in ["adrenaline", "sedatives"]:
+			return _invalid("TARGET_ILLEGAL", "Equipped can recover only adrenaline or sedatives")
+		var acquisition := _plan_acquisition(draft, actor, card_instance_id, payload)
+		if not acquisition.ok:
+			return acquisition
+		draft.items.discard.erase(card_instance_id)
+		_apply_acquisition(draft, actor, card_instance_id, acquisition, events)
+		actor.main_action_completed = true
+		events.append(DomainEventScript.make("CharacterAbilityUsed", {"survivor_id":actor.id,"ability_id":"marco_equipped","card_instance_id":card_instance_id}, "survivors"))
+		return _valid()
+	if source_id == "william_sprint":
+		if actor.id != "william_hooper":
+			return _invalid("TARGET_ILLEGAL", "Only William can use Sprint")
+		var path_value: Variant = payload.get("path_room_ids", [])
+		if not path_value is Array:
+			return _invalid("PATH_ILLEGAL", "Sprint path must be an array")
+		var path: Array = path_value
+		if path.size() < 1 or path.size() > 3:
+			return _invalid("PATH_ILLEGAL", "Sprint requires one to three steps")
+		var path_check: Dictionary = map_graph.validate_path(actor.room_id, path, draft.map.blocked_edge_ids)
+		if not path_check.ok:
+			return _invalid("PATH_ILLEGAL", path_check.reason)
+		for next_value: Variant in path:
+			var source_room_id: String = actor.room_id
+			var next_room_id := str(next_value)
+			actor.room_id = next_room_id
+			events.append(DomainEventScript.make("ActorMoved", {"actor_id":actor.id,"from":source_room_id,"to":next_room_id,"source":"william_sprint"}, "survivors"))
+			if next_room_id == "R4":
+				_record_noise(draft, next_room_id, "sterile_room_entry", false, events)
+		_record_noise(draft, actor.room_id, "william_sprint", false, events)
+		actor.main_action_completed = true
+		events.append(DomainEventScript.make("CharacterAbilityUsed", {"survivor_id":actor.id,"ability_id":"william_sprint"}, "survivors"))
+		return _valid()
+	if source_id == "toolbox":
+		if actor.room_id != "B4" or draft.killer.room_id == actor.room_id:
+			return _invalid("PREREQUISITE_MISSING", "Toolbox requires a safe survivor at B4")
+		if draft.objectives.repair_increased_this_round or draft.objectives.radio_progress >= 5:
+			return _invalid("PREREQUISITE_MISSING", "Radio progress cannot increase now")
+		var toolbox_id := _inventory_instance_with_definition(draft, actor, "toolbox")
+		if toolbox_id.is_empty():
+			return _invalid("RESOURCE_MISSING", "Survivor does not have a toolbox")
+		var previous_progress: int = draft.objectives.radio_progress
+		_consume_item(draft, actor, toolbox_id, "toolbox", events)
+		draft.objectives.radio_progress = mini(5, previous_progress + 2)
+		draft.objectives.repair_increased_this_round = true
+		actor.main_action_completed = true
+		draft.stats.items_used = int(draft.stats.get("items_used", 0)) + 1
+		events.append(DomainEventScript.make("RepairAdded", {"survivor_id":actor.id,"from":previous_progress,"to":draft.objectives.radio_progress,"source":"toolbox"}, "survivors"))
+		_record_noise(draft, "B4", "toolbox", false, events)
+		if draft.objectives.radio_progress >= 5:
+			draft.objectives.rescue_countdown = 5
+			events.append(DomainEventScript.make("RescueAdvanced", {"from":-1,"to":5,"started":true}))
+		return _valid()
 	if source_id == "marco_medical_kit":
 		if actor.id != "marco_carven":
 			return _invalid("TARGET_ILLEGAL", "Only Marco can use his medical kit")
@@ -279,6 +445,7 @@ func _use_special_action(draft: Dictionary, player_id: String, payload: Dictiona
 		actor.inventory_instance_ids.erase(medical_kit_id)
 		draft.items.discard.append(medical_kit_id)
 		actor.main_action_completed = true
+		draft.stats.items_used = int(draft.stats.get("items_used", 0)) + 1
 		events.append(DomainEventScript.make("ItemDiscarded", {"card_instance_id":medical_kit_id,"reason":"marco_medical_kit"}, "survivors"))
 		return _valid()
 	if source_id == "trap_parts":
@@ -291,6 +458,7 @@ func _use_special_action(draft: Dictionary, player_id: String, payload: Dictiona
 		draft.items.discard.append(trap_parts_id)
 		draft.map.trap_room_id = actor.room_id
 		actor.main_action_completed = true
+		draft.stats.items_used = int(draft.stats.get("items_used", 0)) + 1
 		events.append(DomainEventScript.make("ItemDiscarded", {"card_instance_id":trap_parts_id,"reason":"trap_parts"}, "survivors"))
 		events.append(DomainEventScript.make("TrapPlaced", {"room_id":actor.room_id}, "survivors"))
 		return _valid()
@@ -457,6 +625,7 @@ func _use_killer_skill(draft: Dictionary, player_id: String, payload: Dictionary
 	if not effect_result.ok:
 		return effect_result
 	draft.killer.discard.append(card_instance_id)
+	draft.stats.killer_skills_played = int(draft.stats.get("killer_skills_played", 0)) + 1
 	events.append(DomainEventScript.make("SkillDiscarded", {"card_instance_id":card_instance_id,"reason":"played"}, "killer"))
 
 	if draft.phase == "GAME_OVER" or draft.phase.begins_with("ENCOUNTER"):
@@ -736,6 +905,7 @@ func _perform_killer_search(draft: Dictionary, events: Array) -> bool:
 func _start_encounter(draft: Dictionary, survivor_ids: Array, source: String, events: Array) -> void:
 	draft.killer.encounter_started_this_turn = true
 	draft.killer.main_actions_remaining = 0
+	draft.stats.encounters_started = int(draft.stats.get("encounters_started", 0)) + 1
 	draft.encounter = {
 		"id":"encounter-%d-%d" % [draft.round_index, draft.command_sequence + 1],
 		"room_id":draft.killer.room_id,
@@ -864,6 +1034,7 @@ func _select_defense_items(draft: Dictionary, player_id: String, payload: Dictio
 			defender.inventory_instance_ids.erase(instance_id)
 			draft.items.discard.append(instance_id)
 			events.append(DomainEventScript.make("ItemDiscarded", {"card_instance_id":instance_id,"reason":"encounter_defense"}, "survivors"))
+	draft.stats.items_used = int(draft.stats.get("items_used", 0)) + selected_ids.size()
 	draft.encounter.selected_item_instance_ids = selected_ids
 	draft.encounter.selected_item_definition_ids = selected_definition_ids
 	draft.encounter.item_bonus = item_bonus
@@ -902,6 +1073,10 @@ func _resolve_defense_roll(draft: Dictionary, rng, events: Array) -> void:
 	var total: int = dice_total + int(draft.encounter.item_bonus) + trap_bonus + character_bonus
 	var killer_strength: int = int(draft.killer.effective_strength)
 	var success := total >= killer_strength
+	if success:
+		draft.stats.defenses_succeeded = int(draft.stats.get("defenses_succeeded", 0)) + 1
+	else:
+		draft.stats.defenses_failed = int(draft.stats.get("defenses_failed", 0)) + 1
 	events.append(DomainEventScript.make("DefenseRolled", {
 		"survivor_id":defender.id,
 		"dice_count":dice_count,
@@ -1170,6 +1345,7 @@ func _resolve_damage_response(draft: Dictionary, player_id: String, payload: Dic
 			return _invalid("RESOURCE_MISSING", "Ancient amulet is not available")
 		survivor.inventory_instance_ids.erase(amulet_id)
 		draft.items.discard.append(amulet_id)
+		draft.stats.items_used = int(draft.stats.get("items_used", 0)) + 1
 		events.append(DomainEventScript.make("ItemDiscarded", {"card_instance_id":amulet_id,"reason":"ancient_amulet"}, "survivors"))
 		events.append(DomainEventScript.make("DamagePrevented", {"survivor_id":survivor.id,"source":draft.pending_damage.source,"definition_id":"ancient_amulet"}))
 	else:
@@ -1210,6 +1386,12 @@ func _inventory_instance_with_definition(draft: Dictionary, survivor: Dictionary
 		if draft.items.item_instances.get(instance_id, "") == definition_id:
 			return instance_id
 	return ""
+
+
+func _consume_item(draft: Dictionary, survivor: Dictionary, card_instance_id: String, reason: String, events: Array) -> void:
+	survivor.inventory_instance_ids.erase(card_instance_id)
+	draft.items.discard.append(card_instance_id)
+	events.append(DomainEventScript.make("ItemDiscarded", {"card_instance_id":card_instance_id,"reason":reason}, "survivors"))
 
 
 func _update_killer_strength(draft: Dictionary, events: Array) -> void:
@@ -1338,6 +1520,7 @@ func _enter_killer_turn(draft: Dictionary, events: Array) -> void:
 
 
 func _begin_next_survivor_round(draft: Dictionary, events: Array) -> void:
+	draft.stats.rounds_completed = int(draft.stats.get("rounds_completed", 0)) + 1
 	draft.round_index += 1
 	_transition(draft, "SURVIVOR_START", events)
 	draft.noises_last_round = draft.revealed_noise_room_ids.duplicate()
