@@ -5,6 +5,7 @@ const SeededRngScript = preload("res://core/seeded_rng.gd")
 const DomainEventScript = preload("res://core/domain_event.gd")
 const PhaseMachineScript = preload("res://core/phase_machine.gd")
 const MapGraphScript = preload("res://core/map_graph.gd")
+const DEFENSE_DIE_FACES := [0, 0, 1, 1, 1, 3]
 
 const REJECTION_CODES := [
 	"STALE_STATE", "WRONG_PHASE", "NOT_CONTROLLER", "NOT_ACTIVE_ACTOR",
@@ -102,6 +103,20 @@ func _apply_command(draft: Dictionary, command: Dictionary, rng, events: Array) 
 			return _end_killer_slow(draft, command.player_id, rng, events)
 		"ResolveKillerUnlockOverflow":
 			return _resolve_killer_unlock_overflow(draft, command.player_id, payload, rng, events)
+		"SelectAttackSkill":
+			return _select_attack_skill(draft, command.player_id, payload, events)
+		"PassAttackSkill":
+			return _pass_attack_skill(draft, command.player_id, events)
+		"SelectDefender":
+			return _select_defender(draft, command.player_id, payload, events)
+		"SelectDefenseItem":
+			return _select_defense_items(draft, command.player_id, payload, rng, events)
+		"PassDefenseItem":
+			return _select_defense_items(draft, command.player_id, {"card_instance_ids":[]}, rng, events)
+		"ConfirmFlee":
+			return _confirm_flee(draft, command.player_id, payload, rng, events)
+		"ResolveDamageResponse":
+			return _resolve_damage_response(draft, command.player_id, payload, events)
 	return _invalid("WRONG_PHASE", "Command is not implemented")
 
 
@@ -249,22 +264,46 @@ func _use_special_action(draft: Dictionary, player_id: String, payload: Dictiona
 	var check := _main_action_check(draft, player_id, payload.get("actor_id", ""))
 	if not check.ok:
 		return check
-	if payload.get("source_id", "") != "g3_first_aid_cabinet":
-		return _invalid("TARGET_ILLEGAL", "Unknown Milestone 1 special action")
 	var actor: Dictionary = check.survivor
+	var source_id: String = payload.get("source_id", "")
+	if source_id == "marco_medical_kit":
+		if actor.id != "marco_carven":
+			return _invalid("TARGET_ILLEGAL", "Only Marco can use his medical kit")
+		var medical_kit_id := _inventory_instance_with_definition(draft, actor, "marco_medical_kit")
+		if medical_kit_id.is_empty():
+			return _invalid("RESOURCE_MISSING", "Marco no longer has his medical kit")
+		var medical_target := _survivor_by_id(draft, payload.get("target_survivor_id", ""))
+		if medical_target.is_empty() or medical_target.health != "injured":
+			return _invalid("TARGET_ILLEGAL", "Medical kit target must be an injured survivor")
+		_heal_survivor(draft, medical_target, "marco_medical_kit", events)
+		actor.inventory_instance_ids.erase(medical_kit_id)
+		draft.items.discard.append(medical_kit_id)
+		actor.main_action_completed = true
+		events.append(DomainEventScript.make("ItemDiscarded", {"card_instance_id":medical_kit_id,"reason":"marco_medical_kit"}, "survivors"))
+		return _valid()
+	if source_id == "trap_parts":
+		var trap_parts_id := _inventory_instance_with_definition(draft, actor, "trap_parts")
+		if trap_parts_id.is_empty():
+			return _invalid("RESOURCE_MISSING", "Survivor does not have trap parts")
+		if not draft.map.trap_room_id.is_empty():
+			return _invalid("PREREQUISITE_MISSING", "A survivor trap is already on the map")
+		actor.inventory_instance_ids.erase(trap_parts_id)
+		draft.items.discard.append(trap_parts_id)
+		draft.map.trap_room_id = actor.room_id
+		actor.main_action_completed = true
+		events.append(DomainEventScript.make("ItemDiscarded", {"card_instance_id":trap_parts_id,"reason":"trap_parts"}, "survivors"))
+		events.append(DomainEventScript.make("TrapPlaced", {"room_id":actor.room_id}, "survivors"))
+		return _valid()
+	if source_id != "g3_first_aid_cabinet":
+		return _invalid("TARGET_ILLEGAL", "Unknown special action")
 	if actor.room_id != "G3" or not draft.map.first_aid_cabinet_available:
 		return _invalid("PREREQUISITE_MISSING", "The G3 first aid cabinet is not available here")
 	var target := _survivor_by_id(draft, payload.get("target_survivor_id", ""))
 	if target.is_empty() or target.room_id != "G3" or target.health != "injured":
 		return _invalid("TARGET_ILLEGAL", "First aid target must be an injured survivor in G3")
-	var old_fear: int = target.fear
-	target.health = "healthy"
-	target.fear = 0
+	_heal_survivor(draft, target, "g3_first_aid_cabinet", events)
 	draft.map.first_aid_cabinet_available = false
 	actor.main_action_completed = true
-	events.append(DomainEventScript.make("HealthChanged", {"survivor_id":target.id,"from":"injured","to":"healthy"}))
-	if old_fear > 0:
-		events.append(DomainEventScript.make("FearChanged", {"survivor_id":target.id,"from":old_fear,"to":0}, "survivors"))
 	return _valid()
 
 
@@ -420,7 +459,12 @@ func _use_killer_skill(draft: Dictionary, player_id: String, payload: Dictionary
 	draft.killer.discard.append(card_instance_id)
 	events.append(DomainEventScript.make("SkillDiscarded", {"card_instance_id":card_instance_id,"reason":"played"}, "killer"))
 
-	if draft.phase == "GAME_OVER" or draft.phase == "ENCOUNTER_START":
+	if draft.phase == "GAME_OVER" or draft.phase.begins_with("ENCOUNTER"):
+		return _valid()
+	if draft.phase == "DAMAGE_RESPONSE":
+		if timing == "main":
+			draft.killer.main_action_mode = "skill"
+			draft.killer.main_actions_remaining = 0
 		return _valid()
 	if timing == "main":
 		draft.killer.main_action_mode = "skill"
@@ -490,11 +534,12 @@ func _apply_revving_chainsaw(draft: Dictionary, payload: Dictionary, events: Arr
 		var moved := _move_killer_path(draft, path, events)
 		if not moved.ok:
 			return moved
+	var target_ids: Array = []
 	for survivor: Dictionary in draft.survivors:
 		if survivor.health != "eliminated" and survivor.room_id == draft.killer.room_id:
-			_damage_survivor(draft, survivor, "revving_chainsaw", events)
-			if draft.phase == "GAME_OVER":
-				break
+			target_ids.append(survivor.id)
+	var return_phase := "KILLER_SLOW" if draft.phase == "KILLER_MAIN" else "KILLER_FAST"
+	_begin_non_encounter_damage(draft, target_ids, "revving_chainsaw", return_phase, events)
 	return _valid()
 
 
@@ -532,8 +577,13 @@ func _end_killer_slow(draft: Dictionary, player_id: String, rng, events: Array) 
 
 
 func _begin_killer_draw(draft: Dictionary, rng, events: Array) -> void:
+	_begin_killer_draw_operation(draft, int(draft.killer.draw_per_turn), "turn_end", rng, events)
+
+
+func _begin_killer_draw_operation(draft: Dictionary, count: int, context: String, rng, events: Array) -> void:
 	_transition(draft, "KILLER_DRAW", events)
-	draft.killer.pending_draw_count = int(draft.killer.draw_per_turn)
+	draft.killer.pending_draw_count = count
+	draft.killer.pending_draw_context = context
 	_continue_killer_draw(draft, rng, events)
 
 
@@ -556,7 +606,12 @@ func _continue_killer_draw(draft: Dictionary, rng, events: Array) -> void:
 			draft.killer.discard.append(card_instance_id)
 			events.append(DomainEventScript.make("SkillDiscarded", {"card_instance_id":card_instance_id,"reason":"hand_limit"}, "killer"))
 	if draft.killer.pending_draw_count <= 0:
-		_finish_killer_turn(draft, events)
+		var context: String = draft.killer.pending_draw_context
+		draft.killer.pending_draw_context = ""
+		if context == "turn_end":
+			_finish_killer_turn(draft, events)
+		elif context == "encounter_roll":
+			_resolve_defense_roll(draft, rng, events)
 
 
 func _level_up_and_recycle(draft: Dictionary, rng, events: Array) -> void:
@@ -599,7 +654,12 @@ func _resolve_killer_unlock_overflow(draft: Dictionary, player_id: String, paylo
 	draft.killer.discard.append(discard_instance_id)
 	draft.killer.pending_unlock_discard = {}
 	events.append(DomainEventScript.make("SkillDiscarded", {"card_instance_id":discard_instance_id,"reason":"unlock_overflow"}, "killer"))
-	_continue_killer_draw(draft, rng, events)
+	if not draft.killer.pending_draw_context.is_empty():
+		_continue_killer_draw(draft, rng, events)
+	elif not draft.killer.pending_deck_discard_context.is_empty():
+		_continue_killer_deck_discard(draft, rng, events)
+	else:
+		return _invalid("PREREQUISITE_MISSING", "No paused killer operation is waiting")
 	return _valid()
 
 
@@ -608,6 +668,10 @@ func _finish_killer_turn(draft: Dictionary, events: Array) -> void:
 		draft.killer.temporary_modifiers.clear()
 		_update_killer_strength(draft, events)
 	draft.killer.pending_draw_count = 0
+	draft.killer.pending_draw_context = ""
+	draft.killer.pending_deck_discard_count = 0
+	draft.killer.pending_deck_discard_context = ""
+	draft.killer.pending_deck_discarded_instance_ids.clear()
 	draft.killer.main_actions_remaining = 0
 	draft.killer.main_action_mode = ""
 	draft.killer.encounter_started_this_turn = false
@@ -665,12 +729,315 @@ func _perform_killer_search(draft: Dictionary, events: Array) -> bool:
 	events.append(DomainEventScript.make("KillerSearched", {"room_id":draft.killer.room_id,"found":not found_ids.is_empty(),"survivor_ids":found_ids}))
 	if found_ids.is_empty():
 		return false
+	_start_encounter(draft, found_ids, "search", events)
+	return true
+
+
+func _start_encounter(draft: Dictionary, survivor_ids: Array, source: String, events: Array) -> void:
 	draft.killer.encounter_started_this_turn = true
-	draft.encounter = {"room_id":draft.killer.room_id,"survivor_ids":found_ids,"source":"search"}
+	draft.killer.main_actions_remaining = 0
+	draft.encounter = {
+		"id":"encounter-%d-%d" % [draft.round_index, draft.command_sequence + 1],
+		"room_id":draft.killer.room_id,
+		"survivor_ids":survivor_ids.duplicate(),
+		"attacked_survivor_ids":[],
+		"active_defender_id":"",
+		"attack_index":0,
+		"attack_skill_definition_id":"",
+		"selected_item_instance_ids":[],
+		"selected_item_definition_ids":[],
+		"item_bonus":0,
+		"used_weapon":false,
+		"flee_pending_ids":[],
+		"end_reason":"",
+		"source":source,
+	}
 	draft.return_phase = "KILLER_DRAW"
 	_transition(draft, "ENCOUNTER_START", events)
-	events.append(DomainEventScript.make("EncounterStarted", {"room_id":draft.killer.room_id,"survivor_ids":found_ids}))
-	return true
+	events.append(DomainEventScript.make("EncounterStarted", {"encounter_id":draft.encounter.id,"room_id":draft.killer.room_id,"survivor_ids":survivor_ids}))
+	if int(draft.killer.level) >= 5:
+		for survivor_id: String in survivor_ids:
+			var survivor := _survivor_by_id(draft, survivor_id)
+			if not survivor.is_empty() and survivor.health != "eliminated":
+				_damage_survivor(draft, survivor, "butcher_level_5_encounter", events)
+				if draft.phase == "GAME_OVER":
+					return
+	_transition(draft, "ENCOUNTER_ATTACK_SKILL", events)
+
+
+func _select_attack_skill(draft: Dictionary, player_id: String, payload: Dictionary, events: Array) -> Dictionary:
+	var control := _killer_control_check(draft, player_id)
+	if not control.ok:
+		return control
+	var card_instance_id: String = payload.get("card_instance_id", "")
+	if card_instance_id not in draft.killer.hand:
+		return _invalid("RESOURCE_MISSING", "Selected attack skill is not in the killer hand")
+	var definition_id: String = draft.killer.skill_instances.get(card_instance_id, "")
+	var definition: Dictionary = draft.killer.definitions.get(definition_id, {})
+	if definition.get("timing", "") != "attack":
+		return _invalid("TARGET_ILLEGAL", "Selected card is not an attack skill")
+	_clear_encounter_attack_modifier(draft, events)
+	draft.killer.hand.erase(card_instance_id)
+	draft.killer.discard.append(card_instance_id)
+	draft.encounter.attack_skill_definition_id = definition_id
+	var strength_bonus: int = int(definition.get("attack_strength_bonus", 0))
+	if strength_bonus != 0:
+		draft.killer.temporary_modifiers.append({"source_instance_id":card_instance_id,"definition_id":definition_id,"amount":strength_bonus,"encounter_attack":true})
+		_update_killer_strength(draft, events)
+	events.append(DomainEventScript.make("AttackSkillCommitted", {"definition_id":definition_id}))
+	_transition(draft, "ENCOUNTER_DEFENDER", events)
+	return _valid()
+
+
+func _pass_attack_skill(draft: Dictionary, player_id: String, events: Array) -> Dictionary:
+	var control := _killer_control_check(draft, player_id)
+	if not control.ok:
+		return control
+	_clear_encounter_attack_modifier(draft, events)
+	draft.encounter.attack_skill_definition_id = ""
+	events.append(DomainEventScript.make("AttackSkillPassed"))
+	_transition(draft, "ENCOUNTER_DEFENDER", events)
+	return _valid()
+
+
+func _select_defender(draft: Dictionary, player_id: String, payload: Dictionary, events: Array) -> Dictionary:
+	var survivor := _survivor_by_id(draft, payload.get("survivor_id", ""))
+	if survivor.is_empty() or survivor.id not in draft.encounter.survivor_ids or survivor.health == "eliminated":
+		return _invalid("TARGET_ILLEGAL", "Defender must be a living encounter participant")
+	if survivor.id in draft.encounter.attacked_survivor_ids:
+		return _invalid("TARGET_ILLEGAL", "This survivor has already defended in the encounter")
+	if survivor.controller_player_id != player_id:
+		return _invalid("NOT_CONTROLLER", "Player does not control this defender")
+	draft.encounter.active_defender_id = survivor.id
+	draft.encounter.selected_item_instance_ids = []
+	draft.encounter.selected_item_definition_ids = []
+	draft.encounter.item_bonus = 0
+	draft.encounter.used_weapon = false
+	events.append(DomainEventScript.make("DefenderSelected", {"survivor_id":survivor.id}))
+	_transition(draft, "ENCOUNTER_ITEM", events)
+	return _valid()
+
+
+func _select_defense_items(draft: Dictionary, player_id: String, payload: Dictionary, rng, events: Array) -> Dictionary:
+	var defender := _survivor_by_id(draft, draft.encounter.get("active_defender_id", ""))
+	if defender.is_empty():
+		return _invalid("PREREQUISITE_MISSING", "No defender is awaiting an item choice")
+	if defender.controller_player_id != player_id:
+		return _invalid("NOT_CONTROLLER", "Player does not control this defender")
+	var cards_value: Variant = payload.get("card_instance_ids", [])
+	if not cards_value is Array:
+		return _invalid("TARGET_ILLEGAL", "Defense item selection must be an array")
+	var selected_ids: Array = []
+	var selected_definition_ids: Array = []
+	var seen: Dictionary = {}
+	for value: Variant in cards_value:
+		var instance_id := str(value)
+		if seen.has(instance_id) or instance_id not in defender.inventory_instance_ids:
+			return _invalid("RESOURCE_MISSING", "Defense selection contains an unavailable item")
+		seen[instance_id] = true
+		selected_ids.append(instance_id)
+		selected_definition_ids.append(str(draft.items.item_instances.get(instance_id, "")))
+	if selected_ids.size() > 2:
+		return _invalid("TARGET_ILLEGAL", "At most one defense item may be used")
+	var legal_definitions := ["longsword", "shortsword", "limestone_powder", "hatchet", "revolver"]
+	if selected_ids.size() == 1 and selected_definition_ids[0] not in legal_definitions:
+		return _invalid("TARGET_ILLEGAL", "Selected card cannot defend by itself")
+	if selected_ids.size() == 2:
+		var pair: Array = selected_definition_ids.duplicate()
+		pair.sort()
+		if pair != ["ammo_pack", "revolver"]:
+			return _invalid("TARGET_ILLEGAL", "Only a revolver and one ammunition pack may be combined")
+	var item_bonus := 0
+	var used_weapon := false
+	var killer_draw_count := 0
+	for definition_id: String in selected_definition_ids:
+		var definition: Dictionary = draft.items.definitions.get(definition_id, {})
+		item_bonus += int(definition.get("defense_bonus", 0))
+		killer_draw_count += int(definition.get("killer_draw_on_defend", 0))
+		var tags: Array = definition.get("tags", [])
+		if "weapon" in tags or "weapon_ammo" in tags:
+			used_weapon = true
+	for instance_id: String in selected_ids:
+		var definition_id: String = draft.items.item_instances.get(instance_id, "")
+		var definition: Dictionary = draft.items.definitions.get(definition_id, {})
+		if "infinite" not in definition.get("tags", []):
+			defender.inventory_instance_ids.erase(instance_id)
+			draft.items.discard.append(instance_id)
+			events.append(DomainEventScript.make("ItemDiscarded", {"card_instance_id":instance_id,"reason":"encounter_defense"}, "survivors"))
+	draft.encounter.selected_item_instance_ids = selected_ids
+	draft.encounter.selected_item_definition_ids = selected_definition_ids
+	draft.encounter.item_bonus = item_bonus
+	draft.encounter.used_weapon = used_weapon
+	events.append(DomainEventScript.make("EncounterItemCommitted", {"survivor_id":defender.id,"definition_ids":selected_definition_ids,"item_bonus":item_bonus}))
+	if killer_draw_count > 0:
+		_begin_killer_draw_operation(draft, killer_draw_count, "encounter_roll", rng, events)
+	else:
+		_resolve_defense_roll(draft, rng, events)
+	return _valid()
+
+
+func _resolve_defense_roll(draft: Dictionary, rng, events: Array) -> void:
+	if draft.encounter.is_empty():
+		return
+	_transition(draft, "ENCOUNTER_ROLL", events)
+	var defender := _survivor_by_id(draft, draft.encounter.active_defender_id)
+	if defender.is_empty() or defender.health == "eliminated":
+		return
+	var dice_count: int = maxi(0, 4 - int(defender.fear))
+	var dice_results: Array = []
+	var dice_total := 0
+	for die_index in range(dice_count):
+		var result: int = DEFENSE_DIE_FACES[rng.next_index(DEFENSE_DIE_FACES.size())]
+		dice_results.append(result)
+		dice_total += result
+	events.append(DomainEventScript.make("DefenseDiceRolled", {"survivor_id":defender.id,"dice_count":dice_count,"dice_results":dice_results,"dice_total":dice_total}))
+	var trap_bonus := 0
+	if int(draft.encounter.attack_index) == 0 and draft.map.trap_room_id == draft.encounter.room_id:
+		trap_bonus = 2
+		draft.map.trap_room_id = ""
+		events.append(DomainEventScript.make("TrapTriggered", {"room_id":draft.encounter.room_id,"defense_bonus":trap_bonus}))
+	var character_bonus := 0
+	if defender.id == "william_hooper" and not bool(draft.encounter.used_weapon):
+		character_bonus = 1
+	var total: int = dice_total + int(draft.encounter.item_bonus) + trap_bonus + character_bonus
+	var killer_strength: int = int(draft.killer.effective_strength)
+	var success := total >= killer_strength
+	events.append(DomainEventScript.make("DefenseRolled", {
+		"survivor_id":defender.id,
+		"dice_count":dice_count,
+		"dice_results":dice_results,
+		"dice_total":dice_total,
+		"item_bonus":draft.encounter.item_bonus,
+		"trap_bonus":trap_bonus,
+		"character_bonus":character_bonus,
+		"total":total,
+		"killer_strength":killer_strength,
+		"success":success,
+	}))
+	if defender.id not in draft.encounter.attacked_survivor_ids:
+		draft.encounter.attacked_survivor_ids.append(defender.id)
+	draft.encounter.attack_index = int(draft.encounter.attack_index) + 1
+	draft.encounter.active_defender_id = ""
+	if success:
+		_begin_killer_deck_discard(draft, 2, "encounter_success", rng, events)
+		return
+	_damage_survivor(draft, defender, "encounter_failure", events)
+	if draft.phase == "GAME_OVER":
+		return
+	if not _remaining_encounter_defenders(draft).is_empty():
+		_clear_encounter_attack_modifier(draft, events)
+		_transition(draft, "ENCOUNTER_ATTACK_SKILL", events)
+	else:
+		_begin_encounter_flee(draft, "all_participants_attacked", events)
+
+
+func _begin_killer_deck_discard(draft: Dictionary, count: int, context: String, rng, events: Array) -> void:
+	_transition(draft, "KILLER_DECK_DISCARD", events)
+	draft.killer.pending_deck_discard_count = count
+	draft.killer.pending_deck_discard_context = context
+	draft.killer.pending_deck_discarded_instance_ids = []
+	_continue_killer_deck_discard(draft, rng, events)
+
+
+func _continue_killer_deck_discard(draft: Dictionary, rng, events: Array) -> void:
+	while int(draft.killer.pending_deck_discard_count) > 0:
+		if draft.killer.deck.is_empty():
+			_level_up_and_recycle(draft, rng, events)
+			if not draft.killer.pending_unlock_discard.is_empty():
+				_transition(draft, "KILLER_UNLOCK_DISCARD", events)
+				return
+			if draft.killer.deck.is_empty():
+				draft.killer.pending_deck_discard_count = 0
+				break
+		var card_instance_id: String = draft.killer.deck.pop_front()
+		draft.killer.discard.append(card_instance_id)
+		draft.killer.pending_deck_discarded_instance_ids.append(card_instance_id)
+		draft.killer.pending_deck_discard_count -= 1
+		events.append(DomainEventScript.make("KillerDeckCardDiscarded", {"definition_id":draft.killer.skill_instances.get(card_instance_id, "")}))
+	if int(draft.killer.pending_deck_discard_count) <= 0:
+		var context: String = draft.killer.pending_deck_discard_context
+		var discarded_ids: Array = draft.killer.pending_deck_discarded_instance_ids.duplicate()
+		draft.killer.pending_deck_discard_context = ""
+		draft.killer.pending_deck_discarded_instance_ids = []
+		if context == "encounter_success":
+			var definition_ids: Array = []
+			for instance_id: String in discarded_ids:
+				definition_ids.append(draft.killer.skill_instances.get(instance_id, ""))
+			events.append(DomainEventScript.make("KillerRepelled", {"discarded_definition_ids":definition_ids}))
+			_begin_encounter_flee(draft, "defense_succeeded", events)
+
+
+func _begin_encounter_flee(draft: Dictionary, reason: String, events: Array) -> void:
+	_clear_encounter_attack_modifier(draft, events)
+	var pending_ids: Array = []
+	for survivor_id: String in draft.encounter.survivor_ids:
+		var survivor := _survivor_by_id(draft, survivor_id)
+		if not survivor.is_empty() and survivor.health != "eliminated":
+			pending_ids.append(survivor_id)
+	draft.encounter.flee_pending_ids = pending_ids
+	draft.encounter.end_reason = reason
+	_transition(draft, "ENCOUNTER_FLEE", events)
+	events.append(DomainEventScript.make("EncounterFleeStarted", {"survivor_ids":pending_ids,"reason":reason}))
+
+
+func _confirm_flee(draft: Dictionary, player_id: String, payload: Dictionary, rng, events: Array) -> Dictionary:
+	var survivor := _survivor_by_id(draft, payload.get("survivor_id", ""))
+	if survivor.is_empty() or survivor.id not in draft.encounter.get("flee_pending_ids", []):
+		return _invalid("TARGET_ILLEGAL", "Survivor is not awaiting an encounter flee choice")
+	if survivor.controller_player_id != player_id:
+		return _invalid("NOT_CONTROLLER", "Player does not control this survivor")
+	var path_value: Variant = payload.get("path_room_ids", [])
+	if not path_value is Array:
+		return _invalid("PATH_ILLEGAL", "Flee path must be an array")
+	var path: Array = path_value
+	if path.size() > 1:
+		return _invalid("PATH_ILLEGAL", "Encounter flee is zero or one step")
+	if not path.is_empty():
+		var path_check: Dictionary = map_graph.validate_path(survivor.room_id, path, draft.map.blocked_edge_ids)
+		if not path_check.ok:
+			return _invalid("PATH_ILLEGAL", path_check.reason)
+		var source_room_id: String = survivor.room_id
+		var target_room_id := str(path[0])
+		survivor.room_id = target_room_id
+		events.append(DomainEventScript.make("ActorMoved", {"actor_id":survivor.id,"from":source_room_id,"to":target_room_id}))
+		if target_room_id == "R4":
+			_record_noise(draft, target_room_id, "encounter_flee_entry", true, events)
+	draft.encounter.flee_pending_ids.erase(survivor.id)
+	events.append(DomainEventScript.make("FleeConfirmed", {"survivor_id":survivor.id,"room_id":survivor.room_id}))
+	if draft.encounter.flee_pending_ids.is_empty():
+		_finish_encounter(draft, rng, events)
+	return _valid()
+
+
+func _finish_encounter(draft: Dictionary, rng, events: Array) -> void:
+	var encounter_id: String = draft.encounter.get("id", "")
+	var reason: String = draft.encounter.get("end_reason", "")
+	events.append(DomainEventScript.make("EncounterEnded", {"encounter_id":encounter_id,"reason":reason}))
+	draft.encounter = {}
+	draft.return_phase = ""
+	_begin_killer_draw(draft, rng, events)
+
+
+func _remaining_encounter_defenders(draft: Dictionary) -> Array:
+	var result: Array = []
+	for survivor_id: String in draft.encounter.survivor_ids:
+		var survivor := _survivor_by_id(draft, survivor_id)
+		if not survivor.is_empty() and survivor.health != "eliminated" and survivor_id not in draft.encounter.attacked_survivor_ids:
+			result.append(survivor_id)
+	return result
+
+
+func _clear_encounter_attack_modifier(draft: Dictionary, events: Array) -> void:
+	var kept: Array = []
+	var removed := false
+	for modifier: Dictionary in draft.killer.temporary_modifiers:
+		if modifier.get("encounter_attack", false):
+			removed = true
+		else:
+			kept.append(modifier)
+	if removed:
+		draft.killer.temporary_modifiers = kept
+		_update_killer_strength(draft, events)
 
 
 func _place_blocks(draft: Dictionary, target_edge_ids: Array, relocation_edge_ids: Array, events: Array) -> Dictionary:
@@ -748,6 +1115,74 @@ func _add_fear(draft: Dictionary, survivor: Dictionary, source: String, events: 
 	events.append(DomainEventScript.make("FearChanged", {"survivor_id":survivor.id,"from":old_fear,"to":survivor.fear}, "survivors"))
 
 
+func _begin_non_encounter_damage(draft: Dictionary, survivor_ids: Array, source: String, return_phase: String, events: Array) -> void:
+	draft.pending_damage = {
+		"survivor_ids":survivor_ids.duplicate(),
+		"current_survivor_id":"",
+		"source":source,
+		"return_phase":return_phase,
+		"resume_after_response":false,
+	}
+	_advance_pending_damage(draft, events)
+
+
+func _advance_pending_damage(draft: Dictionary, events: Array) -> void:
+	while not draft.pending_damage.is_empty() and not draft.pending_damage.survivor_ids.is_empty():
+		var survivor_id: String = draft.pending_damage.survivor_ids[0]
+		var survivor := _survivor_by_id(draft, survivor_id)
+		if survivor.is_empty() or survivor.health == "eliminated":
+			draft.pending_damage.survivor_ids.pop_front()
+			continue
+		var amulet_id := _inventory_instance_with_definition(draft, survivor, "ancient_amulet")
+		if not amulet_id.is_empty():
+			draft.pending_damage.current_survivor_id = survivor_id
+			draft.pending_damage.resume_after_response = true
+			if draft.phase != "DAMAGE_RESPONSE":
+				_transition(draft, "DAMAGE_RESPONSE", events)
+			events.append(DomainEventScript.make("DamageResponseRequested", {"survivor_id":survivor_id,"source":draft.pending_damage.source,"card_instance_id":amulet_id}, "survivors"))
+			return
+		draft.pending_damage.survivor_ids.pop_front()
+		_damage_survivor(draft, survivor, draft.pending_damage.source, events)
+		if draft.phase == "GAME_OVER":
+			draft.pending_damage = {}
+			return
+	if draft.pending_damage.is_empty():
+		return
+	var return_phase: String = draft.pending_damage.return_phase
+	var should_resume: bool = bool(draft.pending_damage.resume_after_response)
+	draft.pending_damage = {}
+	if should_resume and draft.phase != "GAME_OVER":
+		_transition(draft, return_phase, events)
+
+
+func _resolve_damage_response(draft: Dictionary, player_id: String, payload: Dictionary, events: Array) -> Dictionary:
+	if draft.pending_damage.is_empty():
+		return _invalid("PREREQUISITE_MISSING", "No damage response is pending")
+	var survivor := _survivor_by_id(draft, draft.pending_damage.current_survivor_id)
+	if survivor.is_empty():
+		return _invalid("TARGET_ILLEGAL", "Pending damage survivor is missing")
+	if survivor.controller_player_id != player_id:
+		return _invalid("NOT_CONTROLLER", "Player does not control the damaged survivor")
+	var use_amulet: bool = bool(payload.get("use_amulet", false))
+	if use_amulet:
+		var amulet_id := _inventory_instance_with_definition(draft, survivor, "ancient_amulet")
+		if amulet_id.is_empty():
+			return _invalid("RESOURCE_MISSING", "Ancient amulet is not available")
+		survivor.inventory_instance_ids.erase(amulet_id)
+		draft.items.discard.append(amulet_id)
+		events.append(DomainEventScript.make("ItemDiscarded", {"card_instance_id":amulet_id,"reason":"ancient_amulet"}, "survivors"))
+		events.append(DomainEventScript.make("DamagePrevented", {"survivor_id":survivor.id,"source":draft.pending_damage.source,"definition_id":"ancient_amulet"}))
+	else:
+		_damage_survivor(draft, survivor, draft.pending_damage.source, events)
+	draft.pending_damage.survivor_ids.pop_front()
+	draft.pending_damage.current_survivor_id = ""
+	if draft.phase == "GAME_OVER":
+		draft.pending_damage = {}
+		return _valid()
+	_advance_pending_damage(draft, events)
+	return _valid()
+
+
 func _damage_survivor(draft: Dictionary, survivor: Dictionary, source: String, events: Array) -> void:
 	var old_health: String = survivor.health
 	if old_health == "healthy":
@@ -759,6 +1194,22 @@ func _damage_survivor(draft: Dictionary, survivor: Dictionary, source: String, e
 	events.append(DomainEventScript.make("HealthChanged", {"survivor_id":survivor.id,"from":old_health,"to":survivor.health,"source":source}))
 	if survivor.health == "eliminated":
 		_end_match(draft, "killer", "survivor_eliminated", events)
+
+
+func _heal_survivor(_draft: Dictionary, survivor: Dictionary, source: String, events: Array) -> void:
+	var old_fear: int = int(survivor.fear)
+	survivor.health = "healthy"
+	survivor.fear = 0
+	events.append(DomainEventScript.make("HealthChanged", {"survivor_id":survivor.id,"from":"injured","to":"healthy","source":source}))
+	if old_fear > 0:
+		events.append(DomainEventScript.make("FearChanged", {"survivor_id":survivor.id,"from":old_fear,"to":0}, "survivors"))
+
+
+func _inventory_instance_with_definition(draft: Dictionary, survivor: Dictionary, definition_id: String) -> String:
+	for instance_id: String in survivor.inventory_instance_ids:
+		if draft.items.item_instances.get(instance_id, "") == definition_id:
+			return instance_id
+	return ""
 
 
 func _update_killer_strength(draft: Dictionary, events: Array) -> void:

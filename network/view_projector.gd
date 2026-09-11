@@ -31,6 +31,7 @@ static func state_for_side(state: Dictionary, side: String) -> Dictionary:
 		view.revealed_noise_room_ids = state.revealed_noise_room_ids.duplicate()
 		view.firecracker_active = state.firecracker_active
 		view.encounter = state.encounter.duplicate(true)
+		view.pending_damage = state.pending_damage.duplicate(true)
 	else:
 		view.survivors = []
 		for survivor: Dictionary in state.survivors:
@@ -47,7 +48,7 @@ static func state_for_side(state: Dictionary, side: String) -> Dictionary:
 		view.noises_last_round = state.noises_last_round.duplicate()
 		view.revealed_noise_room_ids = state.revealed_noise_room_ids.duplicate()
 		view.firecracker_active = state.firecracker_active
-		view.encounter = state.encounter.duplicate(true) if state.phase.begins_with("ENCOUNTER") else {}
+		view.encounter = state.encounter.duplicate(true) if not state.encounter.is_empty() else {}
 		view.map.erase("trap_room_id")
 		view.map.erase("first_aid_cabinet_available")
 	return view
@@ -96,6 +97,9 @@ static func _killer_side_killer_view(killer: Dictionary) -> Dictionary:
 		"main_actions_remaining": killer.main_actions_remaining,
 		"main_action_mode": killer.main_action_mode,
 		"pending_draw_count": killer.pending_draw_count,
+		"pending_draw_context": killer.pending_draw_context,
+		"pending_deck_discard_count": killer.pending_deck_discard_count,
+		"pending_deck_discard_context": killer.pending_deck_discard_context,
 		"pending_unlock_discard": killer.pending_unlock_discard.duplicate(true),
 	}
 

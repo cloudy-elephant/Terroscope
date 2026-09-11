@@ -83,7 +83,7 @@ func _test_public_inference_and_search_hit() -> void:
 	_accept(host, "EndKillerFast", "player_killer", {})
 	_accept(host, "KillerMove", "player_killer", {"target_room_id":"R4"})
 	var search := _accept(host, "KillerSearch", "player_killer", {})
-	_expect_eq(host.state.data.phase, "ENCOUNTER_START", "searching the inferred room starts an encounter")
+	_expect_eq(host.state.data.phase, "ENCOUNTER_ATTACK_SKILL", "searching the inferred room starts an encounter")
 	_expect_eq(host.state.data.encounter.survivor_ids, ["marco_carven"], "search reveals only survivors in the searched room")
 	_expect_eq(host.state.data.return_phase, "KILLER_DRAW", "encounter will end the killer turn through draw")
 	var encounter_event := _event_of_type(search.events, "EncounterStarted")
@@ -219,7 +219,7 @@ func _test_main_skills() -> void:
 	var rage_cost := _other_regular_instances(rage_host, rage_id, 1)
 	_set_killer_hand(rage_host, [rage_id, rage_cost[0]])
 	_accept(rage_host, "UseKillerSkill", "player_killer", {"card_instance_id":rage_id,"cost_card_instance_ids":rage_cost,"path_segments":[["R2"],["R3"]]})
-	_expect_eq(rage_host.state.data.phase, "ENCOUNTER_START", "Brutal Rage repeats after breaking a block and stops on a search hit")
+	_expect_eq(rage_host.state.data.phase, "ENCOUNTER_ATTACK_SKILL", "Brutal Rage repeats after breaking a block and stops on a search hit")
 	_expect_eq(rage_host.state.data.killer.room_id, "R3", "Brutal Rage applies its movement segments in order")
 	_expect("R1--R2" not in rage_host.state.data.map.blocked_edge_ids, "Brutal Rage removes a crossed block")
 

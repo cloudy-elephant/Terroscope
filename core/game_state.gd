@@ -4,8 +4,8 @@ extends RefCounted
 const SeededRngScript = preload("res://core/seeded_rng.gd")
 
 const RULES_VERSION := "0.1.0"
-const CONTENT_VERSION := "0.3.0"
-const SCHEMA_VERSION := "0.3.0"
+const CONTENT_VERSION := "0.4.0"
+const SCHEMA_VERSION := "0.4.0"
 
 var data: Dictionary
 
@@ -114,6 +114,10 @@ func initialize(
 			"hand_limit": int(killer_content.get("hand_limit", 5)),
 			"max_level": int(killer_content.get("max_level", 5)),
 			"pending_draw_count": 0,
+			"pending_draw_context": "",
+			"pending_deck_discard_count": 0,
+			"pending_deck_discard_context": "",
+			"pending_deck_discarded_instance_ids": [],
 			"pending_unlock_discard": {},
 			"skill_instances": killer_instances,
 		},
@@ -133,6 +137,7 @@ func initialize(
 		"revealed_noise_room_ids": [],
 		"firecracker_active": false,
 		"encounter": {},
+		"pending_damage": {},
 		"processed_commands": {},
 		"winner": "",
 		"end_reason": "",

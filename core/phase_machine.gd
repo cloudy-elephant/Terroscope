@@ -11,7 +11,15 @@ const ALLOWED_COMMANDS := {
 	"KILLER_MAIN": ["UseKillerSkill", "KillerMove", "KillerSearch"],
 	"KILLER_SLOW": ["UseKillerSkill", "EndKillerSlow"],
 	"KILLER_UNLOCK_DISCARD": ["ResolveKillerUnlockOverflow"],
+	"KILLER_DRAW": [],
+	"KILLER_DECK_DISCARD": [],
 	"ENCOUNTER_START": [],
+	"ENCOUNTER_ATTACK_SKILL": ["SelectAttackSkill", "PassAttackSkill"],
+	"ENCOUNTER_DEFENDER": ["SelectDefender"],
+	"ENCOUNTER_ITEM": ["SelectDefenseItem", "PassDefenseItem"],
+	"ENCOUNTER_ROLL": [],
+	"ENCOUNTER_FLEE": ["ConfirmFlee"],
+	"DAMAGE_RESPONSE": ["ResolveDamageResponse"],
 	"GAME_OVER": [],
 }
 

@@ -11,7 +11,7 @@ func _ready() -> void:
 		push_error(started.message)
 		get_tree().quit(1)
 		return
-	print("=== Milestones 0-2: Terrorscape Laboratory rules sandbox ===")
+	print("=== Milestones 0-3: Terrorscape Laboratory rules sandbox ===")
 	_print_events(started.events)
 	var command_number = 1
 	for survivor_id in ["marco_carven", "william_hooper", "anna_kubrick"]:
