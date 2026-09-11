@@ -1,0 +1,20 @@
+{
+  "id": "butcher",
+  "version": "0.1.0",
+  "start_room_id": "R1",
+  "start_level": 1,
+  "start_strength": 5,
+  "starting_hand_size": 2,
+  "draw_per_turn": 3,
+  "deck": [
+    {"id":"pursue","count":3},
+    {"id":"madness","count":1},
+    {"id":"barricade","count":3},
+    {"id":"sense","count":2},
+    {"id":"stayyyy","count":1},
+    {"id":"revving_chainsaw","count":2}
+  ],
+  "locked": [
+    {"id":"brutal_rage","count":1,"unlock_level":3}
+  ]
+}

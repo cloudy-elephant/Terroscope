@@ -1,0 +1,29 @@
+{
+  "version": "0.1.0",
+  "discover": [
+    {"id":"sedatives","count":3},
+    {"id":"key","count":2},
+    {"id":"firecrackers","count":1},
+    {"id":"longsword","count":1},
+    {"id":"short_sword","count":1},
+    {"id":"trap_parts","count":1},
+    {"id":"ammunition_pack","count":3},
+    {"id":"toolbox","count":2},
+    {"id":"hatchet","count":3},
+    {"id":"lime_powder","count":1},
+    {"id":"whiskey_bottle","count":3},
+    {"id":"revolver","count":2},
+    {"id":"adrenaline","count":3},
+    {"id":"ancient_talisman","count":1}
+  ],
+  "search": [
+    {"id":"key","count":5,"fixed_bottom_instances":1},
+    {"id":"toolbox","count":2},
+    {"id":"hatchet","count":1},
+    {"id":"lime_powder","count":1},
+    {"id":"whiskey_bottle","count":1}
+  ],
+  "starting": [
+    {"id":"marcos_medical_kit","count":1,"owner_character_id":"marco_carven"}
+  ]
+}

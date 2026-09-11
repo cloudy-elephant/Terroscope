@@ -1,0 +1,53 @@
+{
+  "id": "laboratory",
+  "version": "0.1.0",
+  "display_name_en": "The Laboratory",
+  "display_name_zh": "实验室",
+  "block_supply_total": 7,
+  "initial_blocked_edges": ["B1--B4"],
+  "survivor_start_room_id": "G1",
+  "killer_start_room_id": "R1",
+  "first_aid_room_id": "G3",
+  "rooms": [
+    {"id":"R1","name_en":"Bio-lab","name_zh":"生化实验室","region":"R","features":["search","hidden_exit","killer_start"]},
+    {"id":"R2","name_en":"Ancient Ruins","name_zh":"古代遗迹","region":"R","features":["secret_passage_ii","survival_plan"]},
+    {"id":"R3","name_en":"Abandoned Mine","name_zh":"废弃矿脉","region":"R","features":["survival_plan"]},
+    {"id":"R4","name_en":"Sterile Room","name_zh":"无菌室","region":"R","features":["survivor_move_entry_noise"]},
+    {"id":"R5","name_en":"North Passage","name_zh":"北侧过道","region":"R","features":[]},
+    {"id":"B1","name_en":"Main Laboratory","name_zh":"主实验室","region":"B","features":["search","secret_passage_i"]},
+    {"id":"B2","name_en":"Records Room","name_zh":"档案室","region":"B","features":[]},
+    {"id":"B3","name_en":"Office","name_zh":"办公室","region":"B","features":[]},
+    {"id":"B4","name_en":"Generator Room","name_zh":"发电机室","region":"B","features":["radio"]},
+    {"id":"B5","name_en":"Quartz Cave","name_zh":"石英岩洞穴","region":"B","features":["secret_passage_ii","survival_plan"]},
+    {"id":"G1","name_en":"Elevator Hall","name_zh":"电梯大厅","region":"G","features":["main_exit","secret_passage_i","survivor_start"]},
+    {"id":"G2","name_en":"Meeting Room","name_zh":"会议室","region":"G","features":[]},
+    {"id":"G3","name_en":"Medical Room","name_zh":"医疗室","region":"G","features":["first_aid_cabinet"]},
+    {"id":"G4","name_en":"East Passage","name_zh":"东侧过道","region":"G","features":[]},
+    {"id":"G5","name_en":"Break Room","name_zh":"休息室","region":"G","features":["search"]}
+  ],
+  "edges": [
+    {"id":"R1--R2","a":"R1","b":"R2","kind":"door","blockable":true},
+    {"id":"R1--R4","a":"R1","b":"R4","kind":"door","blockable":true},
+    {"id":"R2--R3","a":"R2","b":"R3","kind":"open","blockable":false},
+    {"id":"B4--R3","a":"R3","b":"B4","kind":"door","blockable":true},
+    {"id":"R4--R5","a":"R4","b":"R5","kind":"door","blockable":true},
+    {"id":"B2--R5","a":"R5","b":"B2","kind":"door","blockable":true},
+    {"id":"G4--R5","a":"R5","b":"G4","kind":"door","blockable":true},
+    {"id":"G5--R5","a":"R5","b":"G5","kind":"door","blockable":true},
+    {"id":"G4--G5","a":"G4","b":"G5","kind":"door","blockable":true},
+    {"id":"B1--B2","a":"B1","b":"B2","kind":"door","blockable":true},
+    {"id":"B1--B3","a":"B1","b":"B3","kind":"door","blockable":true},
+    {"id":"B1--B4","a":"B1","b":"B4","kind":"door","blockable":true},
+    {"id":"B2--B3","a":"B2","b":"B3","kind":"door","blockable":true},
+    {"id":"B3--G2","a":"B3","b":"G2","kind":"door","blockable":true},
+    {"id":"G2--G4","a":"G2","b":"G4","kind":"door","blockable":true},
+    {"id":"G3--G4","a":"G4","b":"G3","kind":"door","blockable":true},
+    {"id":"G1--G3","a":"G3","b":"G1","kind":"door","blockable":true},
+    {"id":"B4--B5","a":"B4","b":"B5","kind":"door","blockable":true},
+    {"id":"B5--G1","a":"B5","b":"G1","kind":"door","blockable":true}
+  ],
+  "disabled_secret_passages": [
+    {"id":"secret_i","a":"B1","b":"G1"},
+    {"id":"secret_ii","a":"R2","b":"B5"}
+  ]
+}
