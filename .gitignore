@@ -1,3 +1,6 @@
 .godot/
 .godot-user/
+dist/
+export_templates/*.exe
+*.gd.uid
 *.tmp

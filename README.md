@@ -10,6 +10,16 @@
 
 两台电脑连接同一局域网后，一方创建房间并把界面显示的 IP 和端口告诉另一方；双方准备后由房主开始。单机检查可选择“本机双视图调试”。
 
+## 生成 Windows 测试包
+
+安装与 Godot `4.7.2-stable` 匹配的 Windows x86_64 导出模板，并按 [`export_templates/README.md`](export_templates/README.md) 放置模板文件，然后执行：
+
+```powershell
+& 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --headless --path . --export-release 'Windows x64' 'dist\Terrorscape-Laboratory-0.1.0-rc1-win64\Terrorscape-Laboratory.exe'
+```
+
+游戏版本号为 `0.1.0`，`rc1` 表示这个压缩包是第一版外部测试候选包。导出只包含运行游戏所需资源，不包含自动测试与开发沙盒。
+
 ## 运行 Milestone 0 验收
 
 ```powershell
