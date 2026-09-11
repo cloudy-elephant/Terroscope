@@ -4,6 +4,7 @@ extends RefCounted
 const MapGraphScript = preload("res://core/map_graph.gd")
 const GameStateScript = preload("res://core/game_state.gd")
 const RuleEngineScript = preload("res://core/rule_engine.gd")
+const ViewProjectorScript = preload("res://network/view_projector.gd")
 
 const MAP_PATH := "res://content/maps/laboratory.json"
 const ITEM_PATH := "res://content/items/mvp_items.json"
@@ -39,6 +40,16 @@ func submit(command: Dictionary) -> Dictionary:
 		event_log.append_array(result.events)
 		_capture_phase_snapshots(result.events)
 	return result
+
+
+func view_for_side(side: String) -> Dictionary:
+	if state == null:
+		return {}
+	return ViewProjectorScript.state_for_side(state.data, side)
+
+
+func events_for_side(events: Array, side: String) -> Array:
+	return ViewProjectorScript.events_for_side(events, side)
 
 
 func _capture_phase_snapshots(events: Array) -> void:

@@ -1,11 +1,22 @@
 {
   "id": "butcher",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "start_room_id": "R1",
   "start_level": 1,
   "start_strength": 5,
   "starting_hand_size": 2,
   "draw_per_turn": 3,
+  "hand_limit": 5,
+  "max_level": 5,
+  "definitions": [
+    {"id":"pursue","name_zh":"追逐","timing":"fast","extra_hand_cost":0},
+    {"id":"sense","name_zh":"感知","timing":"fast","extra_hand_cost":0},
+    {"id":"madness","name_zh":"疯狂","timing":"fast","extra_hand_cost":0},
+    {"id":"barricade","name_zh":"路障","timing":"slow","extra_hand_cost":0},
+    {"id":"stayyyy","name_zh":"留下！！","timing":"slow","extra_hand_cost":4},
+    {"id":"revving_chainsaw","name_zh":"链锯轰鸣！","timing":"main","fast_from_level":4,"extra_hand_cost":0},
+    {"id":"brutal_rage","name_zh":"残酷暴怒","timing":"main","unlock_level":3,"extra_hand_cost":1}
+  ],
   "deck": [
     {"id":"pursue","count":3},
     {"id":"madness","count":1},

@@ -1,6 +1,6 @@
 # Terrorscape: The Laboratory
 
-这是依据项目内已确认规格建立的 Godot 4 规则工程。当前已完成 Milestone 0 与 Milestone 1 的无画面规则沙盒：实验室地图图结构、权威状态、确定性随机数、阶段推进、幸存者核心行动、牌库与背包、钥匙和无线电目标，以及噪声生命周期。
+这是依据项目内已确认规格建立的 Godot 4 规则工程。当前已完成 Milestone 0～2 的无画面规则沙盒：实验室地图、权威状态、幸存者核心循环、屠夫推理循环、技能牌与升级，以及双方信息投影。
 
 ## 运行沙盒
 
@@ -25,3 +25,11 @@
 ```
 
 测试覆盖三名幸存者的自由行动顺序、全部主要行动、搜索与发现、背包容量、钥匙与无线电胜利、牌库耗尽、噪声公开和跨轮清理。
+
+## 运行 Milestone 2 验收
+
+```powershell
+& 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --headless --path . --script res://tests/run_milestone_2.gd
+```
+
+测试覆盖杀手标准行动、噪声推理与搜索、屠夫技能、封锁供应、手牌与弃牌、抽空升级、动态技能时机和双方视图脱敏。搜索命中后停在 `ENCOUNTER_START`，由 Milestone 3 接续遭遇结算。

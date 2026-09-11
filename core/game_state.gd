@@ -4,8 +4,8 @@ extends RefCounted
 const SeededRngScript = preload("res://core/seeded_rng.gd")
 
 const RULES_VERSION := "0.1.0"
-const CONTENT_VERSION := "0.2.0"
-const SCHEMA_VERSION := "0.2.0"
+const CONTENT_VERSION := "0.3.0"
+const SCHEMA_VERSION := "0.3.0"
 
 var data: Dictionary
 
@@ -40,12 +40,21 @@ func initialize(
 
 	var starting_items := _build_instances("starting", item_content.get("starting", []), item_instances)
 	var killer_instances: Dictionary = {}
+	var killer_definitions: Dictionary = {}
+	for definition: Dictionary in killer_content.get("definitions", []):
+		killer_definitions[definition.get("id", "")] = definition.duplicate(true)
 	var killer_deck := _build_instances("killer", killer_content.get("deck", []), killer_instances)
 	killer_deck = rng.shuffled(killer_deck)
 	var killer_hand: Array = []
 	for draw_index in range(int(killer_content.get("starting_hand_size", 2))):
 		killer_hand.append(killer_deck.pop_front())
 	var locked_cards := _build_instances("killer_locked", killer_content.get("locked", []), killer_instances)
+	var unlocked_skill_ids: Array = []
+	for instance_id: String in killer_deck + killer_hand:
+		var definition_id: String = killer_instances[instance_id]
+		if definition_id not in unlocked_skill_ids:
+			unlocked_skill_ids.append(definition_id)
+	unlocked_skill_ids.sort()
 
 	var blocked_edges: Array = map_graph.data.get("initial_blocked_edges", []).duplicate()
 	var survivor_start: String = map_graph.data.get("survivor_start_room_id", "G1")
@@ -90,13 +99,22 @@ func initialize(
 			"is_stealthed": false,
 			"level": int(killer_content.get("start_level", 1)),
 			"base_strength": int(killer_content.get("start_strength", 5)),
+			"effective_strength": int(killer_content.get("start_strength", 5)),
 			"temporary_modifiers": [],
 			"hand": killer_hand,
 			"deck": killer_deck,
 			"discard": [],
 			"locked_cards": locked_cards,
+			"unlocked_skill_ids": unlocked_skill_ids,
+			"definitions": killer_definitions,
 			"main_actions_remaining": 0,
+			"main_action_mode": "",
+			"encounter_started_this_turn": false,
 			"draw_per_turn": int(killer_content.get("draw_per_turn", 3)),
+			"hand_limit": int(killer_content.get("hand_limit", 5)),
+			"max_level": int(killer_content.get("max_level", 5)),
+			"pending_draw_count": 0,
+			"pending_unlock_discard": {},
 			"skill_instances": killer_instances,
 		},
 		"items": {

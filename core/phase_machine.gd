@@ -7,9 +7,11 @@ const ALLOWED_COMMANDS := {
 	"SURVIVOR_SEARCH_RESOLVE": ["ResolveSearchItem"],
 	"SURVIVOR_DISCOVER_SELECT": ["ChooseDiscoverer"],
 	"SURVIVOR_DISCOVER_RESOLVE": ["ResolveDiscover"],
-	"KILLER_FAST": ["EndKillerFast"],
-	"KILLER_MAIN": ["KillerMove"],
-	"KILLER_SLOW": ["EndKillerSlow"],
+	"KILLER_FAST": ["UseKillerSkill", "EndKillerFast"],
+	"KILLER_MAIN": ["UseKillerSkill", "KillerMove", "KillerSearch"],
+	"KILLER_SLOW": ["UseKillerSkill", "EndKillerSlow"],
+	"KILLER_UNLOCK_DISCARD": ["ResolveKillerUnlockOverflow"],
+	"ENCOUNTER_START": [],
 	"GAME_OVER": [],
 }
 
