@@ -3,7 +3,8 @@ extends RefCounted
 
 const ALLOWED_COMMANDS := {
 	"SURVIVOR_CHOOSE_ACTOR": ["BeginSurvivorActivation"],
-	"SURVIVOR_ACTIVATION": ["Calm", "EndActivation"],
+	"SURVIVOR_ACTIVATION": ["MoveSurvivor", "Calm", "RemoveBlock", "RepairRadio", "BeginSearch", "UseSpecialAction", "EndActivation"],
+	"SURVIVOR_SEARCH_RESOLVE": ["ResolveSearchItem"],
 	"SURVIVOR_DISCOVER_SELECT": ["ChooseDiscoverer"],
 	"SURVIVOR_DISCOVER_RESOLVE": ["ResolveDiscover"],
 	"KILLER_FAST": ["EndKillerFast"],

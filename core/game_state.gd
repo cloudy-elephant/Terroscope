@@ -4,8 +4,8 @@ extends RefCounted
 const SeededRngScript = preload("res://core/seeded_rng.gd")
 
 const RULES_VERSION := "0.1.0"
-const CONTENT_VERSION := "0.1.0"
-const SCHEMA_VERSION := "0.1.0"
+const CONTENT_VERSION := "0.2.0"
+const SCHEMA_VERSION := "0.2.0"
 
 var data: Dictionary
 
@@ -21,6 +21,9 @@ func initialize(
 		killer_content: Dictionary
 ) -> void:
 	var rng := SeededRngScript.new(seed_value)
+	var item_definitions: Dictionary = {}
+	for definition: Dictionary in item_content.get("definitions", []):
+		item_definitions[definition.get("id", "")] = definition.duplicate(true)
 	var item_instances: Dictionary = {}
 	var discover_deck := _build_instances("discover", item_content.get("discover", []), item_instances)
 	discover_deck = rng.shuffled(discover_deck)
@@ -97,6 +100,8 @@ func initialize(
 			"skill_instances": killer_instances,
 		},
 		"items": {
+			"inventory_limit": int(item_content.get("inventory_limit", 3)),
+			"definitions": item_definitions,
 			"item_instances": item_instances,
 			"discover_deck": discover_deck,
 			"search_deck": search_deck,
@@ -107,6 +112,7 @@ func initialize(
 		"objectives": {"radio_progress":0,"repair_increased_this_round":false,"rescue_countdown":-1},
 		"noises_this_round": [],
 		"noises_last_round": [],
+		"revealed_noise_room_ids": [],
 		"firecracker_active": false,
 		"encounter": {},
 		"processed_commands": {},

@@ -1,29 +1,47 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "inventory_limit": 3,
+  "definitions": [
+    {"id":"sedatives","name_zh":"镇静剂","draw_noise":false},
+    {"id":"key","name_zh":"钥匙","draw_noise":true,"team_objective":true},
+    {"id":"firecracker","name_zh":"爆竹","draw_noise":false},
+    {"id":"longsword","name_zh":"长剑","draw_noise":true,"tags":["weapon","infinite"]},
+    {"id":"shortsword","name_zh":"短剑","draw_noise":false,"tags":["weapon","infinite"]},
+    {"id":"trap_parts","name_zh":"陷阱零件","draw_noise":false},
+    {"id":"ammo_pack","name_zh":"弹药包","draw_noise":false,"tags":["weapon_ammo"]},
+    {"id":"toolbox","name_zh":"工具箱","draw_noise":true},
+    {"id":"hatchet","name_zh":"手斧","draw_noise":false,"tags":["weapon"]},
+    {"id":"limestone_powder","name_zh":"石灰粉","draw_noise":false},
+    {"id":"whiskey_bottle","name_zh":"威士忌酒瓶","draw_noise":false},
+    {"id":"revolver","name_zh":"左轮手枪","draw_noise":false,"tags":["weapon","infinite"]},
+    {"id":"adrenaline","name_zh":"肾上腺素","draw_noise":false},
+    {"id":"ancient_amulet","name_zh":"古代护符","draw_noise":true},
+    {"id":"marco_medical_kit","name_zh":"马尔科的医疗包","draw_noise":false}
+  ],
   "discover": [
     {"id":"sedatives","count":3},
     {"id":"key","count":2},
-    {"id":"firecrackers","count":1},
+    {"id":"firecracker","count":1},
     {"id":"longsword","count":1},
-    {"id":"short_sword","count":1},
+    {"id":"shortsword","count":1},
     {"id":"trap_parts","count":1},
-    {"id":"ammunition_pack","count":3},
+    {"id":"ammo_pack","count":3},
     {"id":"toolbox","count":2},
     {"id":"hatchet","count":3},
-    {"id":"lime_powder","count":1},
+    {"id":"limestone_powder","count":1},
     {"id":"whiskey_bottle","count":3},
     {"id":"revolver","count":2},
     {"id":"adrenaline","count":3},
-    {"id":"ancient_talisman","count":1}
+    {"id":"ancient_amulet","count":1}
   ],
   "search": [
     {"id":"key","count":5,"fixed_bottom_instances":1},
     {"id":"toolbox","count":2},
     {"id":"hatchet","count":1},
-    {"id":"lime_powder","count":1},
+    {"id":"limestone_powder","count":1},
     {"id":"whiskey_bottle","count":1}
   ],
   "starting": [
-    {"id":"marcos_medical_kit","count":1,"owner_character_id":"marco_carven"}
+    {"id":"marco_medical_kit","count":1,"owner_character_id":"marco_carven"}
   ]
 }

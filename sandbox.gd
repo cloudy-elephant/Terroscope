@@ -11,7 +11,7 @@ func _ready() -> void:
 		push_error(started.message)
 		get_tree().quit(1)
 		return
-	print("=== Milestone 0: Terrorscape Laboratory rules sandbox ===")
+	print("=== Milestones 0-1: Terrorscape Laboratory rules sandbox ===")
 	_print_events(started.events)
 	var command_number = 1
 	for survivor_id in ["marco_carven", "william_hooper", "anna_kubrick"]:
@@ -24,7 +24,7 @@ func _ready() -> void:
 	_submit(host, GameCommandScript.make("ChooseDiscoverer", "sandbox-%02d" % command_number, host.state.data.command_sequence, "player_survivors", {"survivor_id":"anna_kubrick"}))
 	command_number += 1
 	var drawn: Array = host.state.data.items.pending_private_draw.card_instance_ids
-	_submit(host, GameCommandScript.make("ResolveDiscover", "sandbox-%02d" % command_number, host.state.data.command_sequence, "player_survivors", {"keep_card_instance_id":drawn[0]}))
+	_submit(host, GameCommandScript.make("ResolveDiscover", "sandbox-%02d" % command_number, host.state.data.command_sequence, "player_survivors", {"keep_card_instance_id":drawn[0],"keep_inventory_instance_ids":[drawn[0]]}))
 	command_number += 1
 	_submit(host, GameCommandScript.make("EndKillerFast", "sandbox-%02d" % command_number, host.state.data.command_sequence, "player_killer"))
 	command_number += 1

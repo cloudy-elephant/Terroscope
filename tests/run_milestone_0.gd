@@ -117,7 +117,10 @@ func _run_round(seed_value: int):
 	_accept(host, GameCommandScript.make("ChooseDiscoverer", "test-%02d" % command_number, host.state.data.command_sequence, "player_survivors", {"survivor_id":"anna_kubrick"}))
 	command_number += 1
 	var drawn: Array = host.state.data.items.pending_private_draw.card_instance_ids
-	_accept(host, GameCommandScript.make("ResolveDiscover", "test-%02d" % command_number, host.state.data.command_sequence, "player_survivors", {"keep_card_instance_id":drawn[0]}))
+	var discover_payload := {"keep_card_instance_id":drawn[0]}
+	if host.state.data.items.item_instances[drawn[0]] != "key":
+		discover_payload.keep_inventory_instance_ids = [drawn[0]]
+	_accept(host, GameCommandScript.make("ResolveDiscover", "test-%02d" % command_number, host.state.data.command_sequence, "player_survivors", discover_payload))
 	command_number += 1
 	_accept(host, GameCommandScript.make("EndKillerFast", "test-%02d" % command_number, host.state.data.command_sequence, "player_killer"))
 	command_number += 1
