@@ -6,30 +6,24 @@ signal room_clicked(room_id: String)
 const BOARD_SIZE := Vector2(780, 520)
 const MAP_BACKGROUND_PATH := "res://assets/maps/laboratory_background.png"
 
-# The layout follows the photographed board instead of presenting the rooms as a grid.
-# Room rectangles are also the authoritative click targets for the presentation layer.
-const ROOM_RECTS := {
-	"R1":Rect2(18, 22, 130, 76),
-	"R4":Rect2(158, 22, 132, 76),
-	"R5":Rect2(300, 22, 180, 124),
-	"G5":Rect2(622, 26, 140, 116),
-	"G4":Rect2(558, 136, 110, 116),
-	"G3":Rect2(622, 278, 140, 118),
-	"G1":Rect2(622, 424, 140, 74),
-	"B5":Rect2(472, 424, 140, 74),
-	"B4":Rect2(316, 424, 146, 74),
-	"R3":Rect2(158, 424, 148, 74),
-	"R2":Rect2(18, 180, 150, 214),
-	"B1":Rect2(210, 188, 146, 182),
-	"B2":Rect2(370, 176, 156, 104),
-	"B3":Rect2(370, 290, 106, 114),
-	"G2":Rect2(486, 290, 106, 114),
-}
-
-const REGION_COLORS := {
-	"R":Color("a93642"),
-	"B":Color("315e89"),
-	"G":Color("367153"),
+# Interactive regions mapped onto the generated laboratory illustration. Their relative
+# placement follows the numbered physical board supplied as the reference.
+const ROOM_POLYGONS := {
+	"R1":[Vector2(45,22), Vector2(197,22), Vector2(197,105), Vector2(45,105)],
+	"R4":[Vector2(205,25), Vector2(400,25), Vector2(400,105), Vector2(205,105)],
+	"R5":[Vector2(405,20), Vector2(528,20), Vector2(528,45), Vector2(578,45), Vector2(578,150), Vector2(480,150), Vector2(480,125), Vector2(405,125)],
+	"G5":[Vector2(575,35), Vector2(676,35), Vector2(742,80), Vector2(720,162), Vector2(660,180), Vector2(585,140)],
+	"G4":[Vector2(598,145), Vector2(681,170), Vector2(675,270), Vector2(620,270), Vector2(598,215)],
+	"G3":[Vector2(675,244), Vector2(758,244), Vector2(758,382), Vector2(678,382)],
+	"G1":[Vector2(586,383), Vector2(758,383), Vector2(758,478), Vector2(587,478)],
+	"B5":[Vector2(455,354), Vector2(586,354), Vector2(586,478), Vector2(455,478)],
+	"B4":[Vector2(185,349), Vector2(455,349), Vector2(455,458), Vector2(185,458)],
+	"R3":[Vector2(40,260), Vector2(182,260), Vector2(182,423), Vector2(42,423)],
+	"R2":[Vector2(43,105), Vector2(201,105), Vector2(201,255), Vector2(178,255), Vector2(178,260), Vector2(43,260)],
+	"B1":[Vector2(235,150), Vector2(367,150), Vector2(367,349), Vector2(235,349)],
+	"B2":[Vector2(368,150), Vector2(535,150), Vector2(535,233), Vector2(368,233)],
+	"B3":[Vector2(368,234), Vector2(484,234), Vector2(484,349), Vector2(368,349)],
+	"G2":[Vector2(485,230), Vector2(602,230), Vector2(602,350), Vector2(485,350)],
 }
 
 const FEATURE_LABELS := {
@@ -55,15 +49,26 @@ var adjacency: Dictionary = {}
 var view: Dictionary = {}
 var highlighted_room_ids: Array = []
 var preview_path: Array = []
+var pending_destination_room_id := ""
+var destination_flash_phase := 0.0
 var map_background: Texture2D
 
 
 func _ready() -> void:
 	custom_minimum_size = BOARD_SIZE
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	set_process(false)
 	if ResourceLoader.exists(MAP_BACKGROUND_PATH):
 		map_background = load(MAP_BACKGROUND_PATH) as Texture2D
 	_load_map()
+	queue_redraw()
+
+
+func _process(delta: float) -> void:
+	if pending_destination_room_id.is_empty():
+		set_process(false)
+		return
+	destination_flash_phase = fmod(destination_flash_phase + delta * 1.8, 1.0)
 	queue_redraw()
 
 
@@ -84,6 +89,24 @@ func clear_selection() -> void:
 	queue_redraw()
 
 
+func set_pending_destination(room_id: String) -> void:
+	pending_destination_room_id = room_id if ROOM_POLYGONS.has(room_id) else ""
+	destination_flash_phase = 0.0
+	set_process(not pending_destination_room_id.is_empty())
+	queue_redraw()
+
+
+func clear_pending_destination() -> void:
+	pending_destination_room_id = ""
+	destination_flash_phase = 0.0
+	set_process(false)
+	queue_redraw()
+
+
+func destination_flash_strength() -> float:
+	return 0.5 + 0.5 * sin(destination_flash_phase * TAU)
+
+
 func neighbors(room_id: String) -> Array:
 	return adjacency.get(room_id, []).duplicate()
 
@@ -92,8 +115,18 @@ func room_name(room_id: String) -> String:
 	return rooms_by_id.get(room_id, {}).get("name_zh", room_id)
 
 
+func room_polygon(room_id: String) -> PackedVector2Array:
+	return PackedVector2Array(ROOM_POLYGONS.get(room_id, []))
+
+
 func room_rect(room_id: String) -> Rect2:
-	return ROOM_RECTS.get(room_id, Rect2())
+	var polygon := room_polygon(room_id)
+	if polygon.is_empty():
+		return Rect2()
+	var rect := Rect2(polygon[0], Vector2.ZERO)
+	for point: Vector2 in polygon:
+		rect = rect.expand(point)
+	return rect
 
 
 func edge_id(a: String, b: String) -> String:
@@ -123,8 +156,8 @@ func all_blockable_edges() -> Array:
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		for room_id: String in ROOM_RECTS:
-			if room_rect(room_id).has_point(event.position):
+		for room_id: String in ROOM_POLYGONS:
+			if Geometry2D.is_point_in_polygon(event.position, room_polygon(room_id)):
 				room_clicked.emit(room_id)
 				accept_event()
 				return
@@ -134,72 +167,74 @@ func _draw() -> void:
 	if map_data.is_empty():
 		return
 	if map_background != null:
-		draw_texture_rect(map_background, Rect2(Vector2.ZERO, BOARD_SIZE), false, Color(0.62, 0.66, 0.70, 0.82))
+		draw_texture_rect(map_background, Rect2(Vector2.ZERO, BOARD_SIZE), false)
 	else:
 		draw_rect(Rect2(Vector2.ZERO, BOARD_SIZE), Color("111820"), true)
-	draw_rect(Rect2(Vector2.ZERO, BOARD_SIZE), Color(0.01, 0.018, 0.025, 0.28), true)
-	_draw_connections()
+	draw_rect(Rect2(Vector2.ZERO, BOARD_SIZE), Color(0.01, 0.015, 0.02, 0.10), true)
+	_draw_blocked_edges()
 	for room: Dictionary in map_data.get("rooms", []):
-		_draw_room(room)
+		_draw_room_overlay(room)
 
 
-func _draw_connections() -> void:
+func _draw_blocked_edges() -> void:
 	var blocked: Array = view.get("map", {}).get("blocked_edge_ids", [])
-	for edge: Dictionary in map_data.get("edges", []):
-		var from := room_rect(edge.a).get_center()
-		var to := room_rect(edge.b).get_center()
-		var is_blocked: bool = edge.id in blocked
-		draw_line(from, to, Color(0.015, 0.02, 0.025, 0.94), 14.0 if is_blocked else 10.0, true)
-		draw_line(from, to, Color("e5a93c") if is_blocked else Color("8293a1"), 7.0 if is_blocked else 3.0, true)
-		if is_blocked:
-			var midpoint := from.lerp(to, 0.5)
-			draw_circle(midpoint, 9.0, Color("20150a"))
-			draw_line(midpoint + Vector2(-6, -6), midpoint + Vector2(6, 6), Color("ffd166"), 3.0, true)
-			draw_line(midpoint + Vector2(-6, 6), midpoint + Vector2(6, -6), Color("ffd166"), 3.0, true)
+	for edge_id_value: Variant in blocked:
+		var id := str(edge_id_value)
+		if not edges_by_id.has(id):
+			continue
+		var edge: Dictionary = edges_by_id[id]
+		var midpoint := room_rect(edge.a).get_center().lerp(room_rect(edge.b).get_center(), 0.5)
+		draw_circle(midpoint, 11.0, Color(0.03, 0.02, 0.01, 0.94))
+		draw_line(midpoint + Vector2(-7, -7), midpoint + Vector2(7, 7), Color("ffd166"), 4.0, true)
+		draw_line(midpoint + Vector2(-7, 7), midpoint + Vector2(7, -7), Color("ffd166"), 4.0, true)
 
 
-func _draw_room(room: Dictionary) -> void:
+func _draw_room_overlay(room: Dictionary) -> void:
 	var room_id: String = room.id
-	var rect := room_rect(room_id)
-	var fill: Color = REGION_COLORS.get(room.region, Color("3c4650"))
-	fill.a = 0.66
-	if not highlighted_room_ids.is_empty() and room_id not in highlighted_room_ids:
-		fill = fill.darkened(0.55)
-		fill.a = 0.62
-	draw_rect(rect, Color(0.01, 0.015, 0.02, 0.82), true)
-	draw_rect(rect.grow(-3), fill, true)
-	var border := Color("ffd166") if room_id in highlighted_room_ids else Color(0.72, 0.78, 0.82, 0.92)
-	draw_rect(rect, border, false, 4.0 if room_id in highlighted_room_ids else 2.0)
+	var polygon := room_polygon(room_id)
+	var outline := Color(0.82, 0.88, 0.92, 0.34)
+	var width := 1.4
+	if room_id in highlighted_room_ids:
+		draw_colored_polygon(polygon, Color(1.0, 0.78, 0.28, 0.12))
+		outline = Color("ffd166")
+		width = 4.0
 	if room_id in preview_path:
-		draw_rect(rect.grow(-7), Color("65d6ff"), false, 3.0)
-	_draw_room_label(room, rect)
-	_draw_feature_badges(room, rect)
-	_draw_room_markers(room_id, rect)
+		draw_colored_polygon(polygon, Color(0.20, 0.75, 1.0, 0.10))
+		_draw_polygon_outline(polygon, Color("65d6ff"), 3.0)
+	_draw_polygon_outline(polygon, outline, width)
+	if room_id == pending_destination_room_id:
+		var strength := destination_flash_strength()
+		draw_colored_polygon(polygon, Color(1.0, 0.76, 0.20, 0.08 + strength * 0.14))
+		_draw_polygon_outline(polygon, Color(1.0, 0.72 + strength * 0.20, 0.18, 0.45 + strength * 0.55), 4.0 + strength * 3.0)
+	_draw_room_label(room, room_rect(room_id))
+	_draw_room_markers(room_id, room_rect(room_id))
+
+
+func _draw_polygon_outline(polygon: PackedVector2Array, color: Color, width: float) -> void:
+	var closed := polygon.duplicate()
+	closed.append(polygon[0])
+	draw_polyline(closed, color, width, true)
 
 
 func _draw_room_label(room: Dictionary, rect: Rect2) -> void:
 	var font := ThemeDB.fallback_font
-	var label_rect := Rect2(rect.position + Vector2(4, 4), Vector2(rect.size.x - 8, 25))
-	draw_rect(label_rect, Color(0.015, 0.02, 0.025, 0.86), true)
-	draw_string(font, label_rect.position + Vector2(7, 18), str(room.id), HORIZONTAL_ALIGNMENT_LEFT, 28, 14, Color("ffd166"))
-	draw_string(font, label_rect.position + Vector2(37, 18), str(room.get("name_zh", "")), HORIZONTAL_ALIGNMENT_LEFT, label_rect.size.x - 42, 14, Color.WHITE)
-
-
-func _draw_feature_badges(room: Dictionary, rect: Rect2) -> void:
+	var label_width := minf(maxf(88.0, rect.size.x - 10.0), 170.0)
+	var label_rect := Rect2(rect.position + Vector2(5, 5), Vector2(label_width, 24))
+	draw_rect(label_rect, Color(0.015, 0.02, 0.025, 0.82), true)
+	draw_rect(label_rect, Color(0.82, 0.88, 0.92, 0.45), false, 1.0)
+	draw_string(font, label_rect.position + Vector2(6, 17), str(room.id), HORIZONTAL_ALIGNMENT_LEFT, 25, 13, Color("ffd166"))
+	draw_string(font, label_rect.position + Vector2(31, 17), str(room.get("name_zh", "")), HORIZONTAL_ALIGNMENT_LEFT, label_rect.size.x - 35, 13, Color.WHITE)
 	var badges: Array[String] = []
 	for feature_value: Variant in room.get("features", []):
 		var feature := str(feature_value)
 		if FEATURE_LABELS.has(feature):
 			badges.append(FEATURE_LABELS[feature])
-	if badges.is_empty():
-		return
-	var font := ThemeDB.fallback_font
-	var text := " · ".join(badges)
-	draw_string(font, rect.position + Vector2(8, 45), text, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 16, 11, Color("dce6ee"))
+	if not badges.is_empty() and rect.size.y >= 70.0:
+		draw_string(font, rect.position + Vector2(7, 44), " · ".join(badges), HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 12, 10, Color(0.9, 0.93, 0.95, 0.90))
 
 
 func _draw_room_markers(room_id: String, rect: Rect2) -> void:
-	var marker_x := rect.position.x + 15.0
+	var marker_x := rect.position.x + 16.0
 	var marker_y := rect.end.y - 15.0
 	var noises: Array = view.get("revealed_noise_room_ids", []).duplicate()
 	if view.has("noises_this_round"):

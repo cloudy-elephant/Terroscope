@@ -15,10 +15,10 @@
 安装与 Godot `4.7.2-stable` 匹配的 Windows x86_64 导出模板，并按 [`export_templates/README.md`](export_templates/README.md) 放置模板文件，然后执行：
 
 ```powershell
-& 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --headless --path . --export-release 'Windows x64' 'dist\Terrorscape-Laboratory-0.1.0-rc2-win64\Terrorscape-Laboratory.exe'
+& 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --headless --path . --export-release 'Windows x64' 'dist\Terrorscape-Laboratory-0.1.0-rc3-win64\Terrorscape-Laboratory.exe'
 ```
 
-游戏版本号为 `0.1.0`，当前测试候选包为 `rc2`。导出只包含运行游戏所需资源，不包含自动测试与开发沙盒。
+游戏版本号为 `0.1.0`，当前测试候选包为 `rc3`。导出只包含运行游戏所需资源，不包含自动测试与开发沙盒。
 
 ## 运行 Milestone 0 验收
 
@@ -66,4 +66,4 @@
 & 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --headless --path . --script res://tests/run_milestone_5.gd
 ```
 
-测试覆盖 38 张确认牌的数量、全部主动道具、工具箱、马尔科“装备齐全”、威廉“冲刺”、完整物品交换、终局统计、新手提示、声音与动画反馈，以及快速重开。Milestone 0～5 当前共 845 项自动断言，其中包括实物地图布局与开局一、二步移动路线的界面验收。
+测试覆盖 38 张确认牌的数量、全部主动道具、工具箱、马尔科“装备齐全”、威廉“冲刺”、完整物品交换、终局统计、新手提示、声音与动画反馈，以及快速重开。Milestone 0～5 当前共 848 项自动断言，其中包括实物地图编号布局、开局一二步移动路线，以及待确认目的地区域闪烁的界面验收。

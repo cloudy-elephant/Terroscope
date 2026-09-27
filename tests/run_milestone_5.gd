@@ -207,7 +207,12 @@ func _test_playable_guidance_and_feedback() -> void:
 	_expect(_contains_text(labels, "2 步：B5 石英岩洞穴 → B4 发电机室"), "opening movement exposes the complete two-step route through B5")
 	app._queue_path_command("移动（1～2 步）", "MoveSurvivor", {"actor_id":"william_hooper"}, ["G3", "G4"])
 	_expect_eq(app.pending_command.payload.path_room_ids, ["G3", "G4"], "a complete two-step route is queued before host submission")
+	_expect_eq(app.map_board.pending_destination_room_id, "G4", "the final destination starts flashing while the route awaits confirmation")
+	var flash_before: float = app.map_board.destination_flash_phase
+	app.map_board._process(0.1)
+	_expect(app.map_board.destination_flash_phase != flash_before, "destination flashing advances over time")
 	app._cancel_pending_command()
+	_expect(app.map_board.pending_destination_room_id.is_empty(), "cancelling a pending route stops the destination flash")
 	app._start_path_selection("冲刺", "UseSpecialAction", {"actor_id":"william_hooper","source_id":"william_sprint"}, "G1", 3, app.session.current_view.map.blocked_edge_ids)
 	_expect("G3" in app.map_board.highlighted_room_ids, "path selection highlights legal adjacent rooms")
 	app._on_room_clicked("G3")

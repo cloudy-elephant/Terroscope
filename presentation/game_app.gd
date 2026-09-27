@@ -325,6 +325,7 @@ func _render_actions(view: Dictionary) -> void:
 	pending_brutal_selection = {}
 	confirmation_panel.visible = false
 	map_board.clear_selection()
+	map_board.clear_pending_destination()
 	var phase: String = view.get("phase", "")
 	if phase == "GAME_OVER":
 		_add_plain_label("%s 获胜：%s" % [view.get("winner", ""), view.get("end_reason", "")])
@@ -690,6 +691,11 @@ func _on_room_clicked(room_id: String) -> void:
 
 func _queue_command(label: String, command_type: String, payload: Dictionary) -> void:
 	pending_command = {"type":command_type,"payload":payload.duplicate(true),"label":label}
+	var path_value: Variant = payload.get("path_room_ids", [])
+	if path_value is Array and not path_value.is_empty():
+		map_board.set_pending_destination(str(path_value.back()))
+	else:
+		map_board.clear_pending_destination()
 	confirmation_label.text = "待提交：%s\n确认后由主机验证并结算，接受后不可撤销。" % label
 	confirmation_panel.visible = true
 
@@ -708,6 +714,7 @@ func _cancel_pending_command() -> void:
 	pending_command = {}
 	confirmation_panel.visible = false
 	map_board.clear_selection()
+	map_board.clear_pending_destination()
 
 
 func _switch_debug_side() -> void:
