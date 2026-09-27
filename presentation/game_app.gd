@@ -592,9 +592,22 @@ func _add_command(label: String, command_type: String, payload: Dictionary) -> v
 
 
 func _add_path_builder(label: String, command_type: String, payload: Dictionary, start_room_id: String, maximum_steps: int, blocked_edges: Array) -> void:
-	action_list.add_child(_button("%s：选择路径" % label, Callable(self, "_start_path_selection").bind(
+	if command_type == "MoveSurvivor":
+		_add_plain_label(label)
+		for path: Array in _legal_paths(start_room_id, maximum_steps, blocked_edges):
+			var route_label := "%d 步：%s" % [path.size(), _path_label(path)]
+			action_list.add_child(_button(route_label, Callable(self, "_queue_path_command").bind(
+				label, command_type, payload.duplicate(true), path.duplicate()
+			)))
+	action_list.add_child(_button("%s：在地图上逐步选择" % label, Callable(self, "_start_path_selection").bind(
 		label, command_type, payload.duplicate(true), start_room_id, maximum_steps, blocked_edges.duplicate()
 	)))
+
+
+func _queue_path_command(label: String, command_type: String, payload: Dictionary, path: Array) -> void:
+	var command_payload := payload.duplicate(true)
+	command_payload.path_room_ids = path.duplicate()
+	_queue_command("%s：%s" % [label, _path_label(path)], command_type, command_payload)
 
 
 func _start_path_selection(label: String, command_type: String, payload: Dictionary, start_room_id: String, maximum_steps: int, blocked_edges: Array) -> void:
@@ -617,10 +630,15 @@ func _render_path_selection() -> void:
 	var current_room_id: String = pending_path_selection.current_room_id
 	var legal_rooms := _legal_neighbors(current_room_id, pending_path_selection.blocked_edge_ids)
 	map_board.set_selection(legal_rooms, path)
-	_add_plain_label("%s\n当前路径：%s" % [pending_path_selection.label, " → ".join(path) if not path.is_empty() else "尚未移动"])
+	_add_plain_label("%s\n已选 %d / %d 步：%s" % [
+		pending_path_selection.label,
+		path.size(),
+		int(pending_path_selection.maximum_steps),
+		_path_label(path) if not path.is_empty() else "请选择第一步",
+	])
 	if path.size() < int(pending_path_selection.maximum_steps):
 		for room_id: String in legal_rooms:
-			action_list.add_child(_button("下一步：%s" % room_id, Callable(self, "_append_path_room").bind(room_id)))
+			action_list.add_child(_button("第 %d 步：%s %s" % [path.size() + 1, room_id, map_board.room_name(room_id)], Callable(self, "_append_path_room").bind(room_id)))
 	if not path.is_empty():
 		action_list.add_child(_button("完成路径", _finish_path_selection))
 		action_list.add_child(_button("撤回上一步", _undo_path_step))
@@ -853,6 +871,34 @@ func _legal_neighbors(room_id: String, blocked_edges: Array) -> Array:
 		if map_board.edge_id(room_id, neighbor) not in blocked_edges:
 			result.append(neighbor)
 	return result
+
+
+func _legal_paths(start_room_id: String, maximum_steps: int, blocked_edges: Array) -> Array:
+	var result: Array = []
+	_collect_legal_paths(start_room_id, maximum_steps, blocked_edges, [], [start_room_id], result)
+	return result
+
+
+func _collect_legal_paths(current_room_id: String, maximum_steps: int, blocked_edges: Array, current_path: Array, visited: Array, output: Array) -> void:
+	if current_path.size() >= maximum_steps:
+		return
+	for neighbor: String in _legal_neighbors(current_room_id, blocked_edges):
+		if neighbor in visited:
+			continue
+		var next_path := current_path.duplicate()
+		next_path.append(neighbor)
+		output.append(next_path)
+		var next_visited := visited.duplicate()
+		next_visited.append(neighbor)
+		_collect_legal_paths(neighbor, maximum_steps, blocked_edges, next_path, next_visited, output)
+
+
+func _path_label(path: Array) -> String:
+	var labels: Array[String] = []
+	for room_value: Variant in path:
+		var room_id := str(room_value)
+		labels.append("%s %s" % [room_id, map_board.room_name(room_id)])
+	return " → ".join(labels)
 
 
 func _view_survivor(view: Dictionary, survivor_id: String) -> Dictionary:
