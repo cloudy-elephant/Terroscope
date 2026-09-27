@@ -25,7 +25,7 @@ func bootstrap(state) -> Array:
 	var events: Array = [DomainEventScript.make("MatchCreated", {"match_id":state.data.match_id,"seed":state.data.seed})]
 	_transition(state.data, "SURVIVOR_START", events)
 	_transition(state.data, "SURVIVOR_CHOOSE_ACTOR", events)
-	return _stamp_events(state.data, events)
+	return _stamp_events(state.data, events, "system")
 
 
 func submit(state, command: Dictionary) -> Dictionary:
@@ -54,7 +54,8 @@ func submit(state, command: Dictionary) -> Dictionary:
 	draft.command_sequence += 1
 	draft.stats.commands_accepted = int(draft.stats.get("commands_accepted", 0)) + 1
 	events.push_front(DomainEventScript.make("CommandAccepted", {"command_id":command_id,"command_sequence":draft.command_sequence}))
-	var stamped_events := _stamp_events(draft, events)
+	var log_side := "killer" if command.get("player_id", "") == "player_killer" else "survivors"
+	var stamped_events := _stamp_events(draft, events, log_side)
 	var result := {
 		"accepted": true,
 		"command_id": command_id,
@@ -1581,12 +1582,13 @@ func _transition(draft: Dictionary, next_phase: String, events: Array) -> void:
 	events.append(DomainEventScript.make("PhaseChanged", {"from":previous_phase,"to":next_phase}))
 
 
-func _stamp_events(draft: Dictionary, events: Array) -> Array:
+func _stamp_events(draft: Dictionary, events: Array, log_side: String) -> Array:
 	var result: Array = []
 	for event: Dictionary in events:
 		draft.event_sequence += 1
 		var stamped := event.duplicate(true)
 		stamped.event_sequence = draft.event_sequence
+		stamped.log_side = log_side
 		result.append(stamped)
 	return result
 

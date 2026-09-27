@@ -1,6 +1,6 @@
 {
   "id": "butcher",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "start_room_id": "R1",
   "start_level": 1,
   "start_strength": 5,
@@ -9,13 +9,13 @@
   "hand_limit": 5,
   "max_level": 5,
   "definitions": [
-    {"id":"pursue","name_zh":"追逐","timing":"fast","extra_hand_cost":0},
-    {"id":"sense","name_zh":"感知","timing":"fast","extra_hand_cost":0},
-    {"id":"madness","name_zh":"疯狂","timing":"fast","extra_hand_cost":0},
-    {"id":"barricade","name_zh":"路障","timing":"slow","extra_hand_cost":0},
-    {"id":"stayyyy","name_zh":"留下！！","timing":"slow","extra_hand_cost":4},
-    {"id":"revving_chainsaw","name_zh":"链锯轰鸣！","timing":"main","fast_from_level":4,"extra_hand_cost":0},
-    {"id":"brutal_rage","name_zh":"残酷暴怒","timing":"main","unlock_level":3,"extra_hand_cost":1}
+    {"id":"pursue","name_zh":"追逐","timing_zh":"快速阶段","rules_zh":"移动 1 个房间。","timing":"fast","extra_hand_cost":0},
+    {"id":"sense","name_zh":"感知","timing_zh":"快速阶段","rules_zh":"选择一个颜色区域，感知其中的幸存者；安娜的“低调”会令她不计入结果。","timing":"fast","extra_hand_cost":0},
+    {"id":"madness","name_zh":"疯狂","timing_zh":"快速阶段","rules_zh":"在一条可封锁连接上放置封锁，并在本回合获得 +2 力量。","timing":"fast","extra_hand_cost":0},
+    {"id":"barricade","name_zh":"路障","timing_zh":"慢速阶段","rules_zh":"在屠夫当前地点的一扇门上放置封锁。","timing":"slow","extra_hand_cost":0},
+    {"id":"stayyyy","name_zh":"留下！！","timing_zh":"慢速阶段","rules_zh":"额外弃置 4 张其他手牌，在当前地点的全部门上放置封锁。","timing":"slow","extra_hand_cost":4},
+    {"id":"revving_chainsaw","name_zh":"链锯轰鸣！","timing_zh":"主要行动（等级 4 起为快速）","rules_zh":"使距离 1 内的幸存者获得恐惧，移动 0～1 个房间，并伤害最终地点内的全部幸存者。","timing":"main","fast_from_level":4,"extra_hand_cost":0},
+    {"id":"brutal_rage","name_zh":"残酷暴怒","timing_zh":"主要行动 · 等级 3 解锁","rules_zh":"额外弃置 1 张其他手牌；移动 1～2 个房间后搜索。若未找到幸存者且移除了封锁，可以继续。","timing":"main","unlock_level":3,"extra_hand_cost":1}
   ],
   "deck": [
     {"id":"pursue","count":3},

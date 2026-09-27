@@ -37,9 +37,15 @@ const FEATURE_LABELS := {
 }
 
 const SURVIVOR_MARKERS := {
-	"marco_carven":"M",
-	"william_hooper":"W",
-	"anna_kubrick":"A",
+	"marco_carven":"马",
+	"william_hooper":"威",
+	"anna_kubrick":"安",
+}
+
+const SURVIVOR_NAMES := {
+	"marco_carven":"马尔科",
+	"william_hooper":"威廉",
+	"anna_kubrick":"安娜",
 }
 
 var map_data: Dictionary = {}
@@ -49,7 +55,10 @@ var adjacency: Dictionary = {}
 var view: Dictionary = {}
 var highlighted_room_ids: Array = []
 var preview_path: Array = []
+var preview_origin_room_id := ""
 var pending_destination_room_id := ""
+var pending_route: Array = []
+var pending_route_origin_room_id := ""
 var destination_flash_phase := 0.0
 var map_background: Texture2D
 
@@ -57,6 +66,7 @@ var map_background: Texture2D
 func _ready() -> void:
 	custom_minimum_size = BOARD_SIZE
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	set_process(false)
 	if ResourceLoader.exists(MAP_BACKGROUND_PATH):
 		map_background = load(MAP_BACKGROUND_PATH) as Texture2D
@@ -77,20 +87,24 @@ func set_view(next_view: Dictionary) -> void:
 	queue_redraw()
 
 
-func set_selection(highlighted: Array, path: Array = []) -> void:
+func set_selection(highlighted: Array, path: Array = [], origin_room_id: String = "") -> void:
 	highlighted_room_ids = highlighted.duplicate()
 	preview_path = path.duplicate()
+	preview_origin_room_id = origin_room_id
 	queue_redraw()
 
 
 func clear_selection() -> void:
 	highlighted_room_ids.clear()
 	preview_path.clear()
+	preview_origin_room_id = ""
 	queue_redraw()
 
 
-func set_pending_destination(room_id: String) -> void:
+func set_pending_destination(room_id: String, route: Array = [], origin_room_id: String = "") -> void:
 	pending_destination_room_id = room_id if ROOM_POLYGONS.has(room_id) else ""
+	pending_route = route.duplicate()
+	pending_route_origin_room_id = origin_room_id
 	destination_flash_phase = 0.0
 	set_process(not pending_destination_room_id.is_empty())
 	queue_redraw()
@@ -98,6 +112,8 @@ func set_pending_destination(room_id: String) -> void:
 
 func clear_pending_destination() -> void:
 	pending_destination_room_id = ""
+	pending_route.clear()
+	pending_route_origin_room_id = ""
 	destination_flash_phase = 0.0
 	set_process(false)
 	queue_redraw()
@@ -163,6 +179,13 @@ func _gui_input(event: InputEvent) -> void:
 				return
 
 
+func _get_tooltip(at_position: Vector2) -> String:
+	for room_id: String in ROOM_POLYGONS:
+		if Geometry2D.is_point_in_polygon(at_position, room_polygon(room_id)):
+			return _room_tooltip(room_id)
+	return ""
+
+
 func _draw() -> void:
 	if map_data.is_empty():
 		return
@@ -171,9 +194,27 @@ func _draw() -> void:
 	else:
 		draw_rect(Rect2(Vector2.ZERO, BOARD_SIZE), Color("111820"), true)
 	draw_rect(Rect2(Vector2.ZERO, BOARD_SIZE), Color(0.01, 0.015, 0.02, 0.10), true)
-	_draw_blocked_edges()
+	_draw_door_icons()
 	for room: Dictionary in map_data.get("rooms", []):
 		_draw_room_overlay(room)
+	_draw_route(preview_origin_room_id, preview_path, Color("65d6ff"), 3.0)
+	_draw_route(pending_route_origin_room_id, pending_route, Color("ffd166"), 4.5)
+	_draw_blocked_edges()
+
+
+func _draw_door_icons() -> void:
+	for id: String in edges_by_id:
+		var edge: Dictionary = edges_by_id[id]
+		if edge.get("kind", "") != "door":
+			continue
+		var start := room_rect(edge.a).get_center()
+		var finish := room_rect(edge.b).get_center()
+		var midpoint := start.lerp(finish, 0.5)
+		var direction := start.direction_to(finish)
+		var perpendicular := Vector2(-direction.y, direction.x)
+		draw_line(midpoint - perpendicular * 9.0, midpoint + perpendicular * 9.0, Color(0.04, 0.05, 0.06, 0.96), 7.0, true)
+		draw_line(midpoint - perpendicular * 8.0, midpoint + perpendicular * 8.0, Color("d9dde2"), 3.0, true)
+		draw_circle(midpoint + perpendicular * 5.5, 1.5, Color("ffd166"))
 
 
 func _draw_blocked_edges() -> void:
@@ -184,9 +225,11 @@ func _draw_blocked_edges() -> void:
 			continue
 		var edge: Dictionary = edges_by_id[id]
 		var midpoint := room_rect(edge.a).get_center().lerp(room_rect(edge.b).get_center(), 0.5)
-		draw_circle(midpoint, 11.0, Color(0.03, 0.02, 0.01, 0.94))
-		draw_line(midpoint + Vector2(-7, -7), midpoint + Vector2(7, 7), Color("ffd166"), 4.0, true)
-		draw_line(midpoint + Vector2(-7, 7), midpoint + Vector2(7, -7), Color("ffd166"), 4.0, true)
+		draw_circle(midpoint, 12.0, Color(0.10, 0.015, 0.015, 0.96))
+		draw_rect(Rect2(midpoint + Vector2(-6, -4), Vector2(12, 10)), Color("e45757"), true)
+		draw_arc(midpoint + Vector2(0, -4), 5.0, PI, TAU, 12, Color("ffd166"), 2.0, true)
+		draw_line(midpoint + Vector2(-4, -2), midpoint + Vector2(4, 6), Color.WHITE, 2.0, true)
+		draw_line(midpoint + Vector2(-4, 6), midpoint + Vector2(4, -2), Color.WHITE, 2.0, true)
 
 
 func _draw_room_overlay(room: Dictionary) -> void:
@@ -200,7 +243,7 @@ func _draw_room_overlay(room: Dictionary) -> void:
 		width = 4.0
 	if room_id in preview_path:
 		draw_colored_polygon(polygon, Color(0.20, 0.75, 1.0, 0.10))
-		_draw_polygon_outline(polygon, Color("65d6ff"), 3.0)
+		_draw_polygon_outline(polygon, Color("65d6ff"), 2.0)
 	_draw_polygon_outline(polygon, outline, width)
 	if room_id == pending_destination_room_id:
 		var strength := destination_flash_strength()
@@ -246,11 +289,11 @@ func _draw_room_markers(room_id: String, rect: Rect2) -> void:
 		marker_x += 22
 	var killer: Dictionary = view.get("killer", {})
 	if killer.get("room_id", "") == room_id:
-		_draw_marker(Vector2(marker_x, marker_y), Color("e74c3c"), "K")
+		_draw_avatar(Vector2(marker_x, marker_y), Color("e74c3c"), "屠")
 		marker_x += 24
 	for survivor: Dictionary in view.get("survivors", []):
 		if survivor.get("room_id", "") == room_id:
-			_draw_marker(Vector2(marker_x, marker_y), Color("65d6ff"), SURVIVOR_MARKERS.get(survivor.get("id", ""), "S"))
+			_draw_avatar(Vector2(marker_x, marker_y), Color("65d6ff"), SURVIVOR_MARKERS.get(survivor.get("id", ""), "幸"))
 			marker_x += 22
 
 
@@ -259,6 +302,66 @@ func _draw_marker(position: Vector2, color: Color, text: String) -> void:
 	draw_circle(position, 7.0, color)
 	var font := ThemeDB.fallback_font
 	draw_string(font, position + Vector2(-5, 4), text, HORIZONTAL_ALIGNMENT_CENTER, 10, 10, Color("101820"))
+
+
+func _draw_avatar(position: Vector2, color: Color, character: String) -> void:
+	draw_circle(position, 10.5, Color(0.01, 0.015, 0.02, 0.98))
+	draw_circle(position, 8.5, color)
+	draw_circle(position + Vector2(0, -2.5), 2.3, Color("101820"))
+	draw_arc(position + Vector2(0, 4.0), 4.5, PI, TAU, 10, Color("101820"), 2.0, true)
+	var font := ThemeDB.fallback_font
+	draw_string(font, position + Vector2(-5, 4), character, HORIZONTAL_ALIGNMENT_CENTER, 10, 9, Color.WHITE)
+
+
+func _draw_route(origin_room_id: String, route: Array, color: Color, width: float) -> void:
+	if origin_room_id.is_empty() or route.is_empty() or not ROOM_POLYGONS.has(origin_room_id):
+		return
+	var source := room_rect(origin_room_id).get_center()
+	for room_value: Variant in route:
+		var target_room_id := str(room_value)
+		if not ROOM_POLYGONS.has(target_room_id):
+			continue
+		var target := room_rect(target_room_id).get_center()
+		var direction := source.direction_to(target)
+		var line_start := source + direction * 13.0
+		var line_end := target - direction * 17.0
+		draw_line(line_start, line_end, Color(0.01, 0.015, 0.02, 0.9), width + 4.0, true)
+		draw_line(line_start, line_end, color, width, true)
+		var perpendicular := Vector2(-direction.y, direction.x)
+		var arrow := PackedVector2Array([
+			line_end + direction * 8.0,
+			line_end - direction * 7.0 + perpendicular * 6.0,
+			line_end - direction * 7.0 - perpendicular * 6.0,
+		])
+		draw_colored_polygon(arrow, color)
+		source = target
+
+
+func _room_tooltip(room_id: String) -> String:
+	var room: Dictionary = rooms_by_id.get(room_id, {})
+	var lines: Array[String] = ["%s · %s" % [room_id, room.get("name_zh", room_id)]]
+	var features: Array[String] = []
+	for feature_value: Variant in room.get("features", []):
+		var feature := str(feature_value)
+		if FEATURE_LABELS.has(feature):
+			features.append(FEATURE_LABELS[feature])
+	if not features.is_empty():
+		lines.append("地点功能：%s" % "、".join(features))
+	var exits: Array[String] = []
+	var blocked: Array = view.get("map", {}).get("blocked_edge_ids", [])
+	for neighbor: String in neighbors(room_id):
+		var id := edge_id(room_id, neighbor)
+		exits.append("%s%s" % [neighbor, "（已封锁）" if id in blocked else ""])
+	lines.append("相邻地点：%s" % "、".join(exits))
+	var occupants: Array[String] = []
+	if view.get("killer", {}).get("room_id", "") == room_id:
+		occupants.append("屠夫")
+	for survivor: Dictionary in view.get("survivors", []):
+		if survivor.get("room_id", "") == room_id:
+			occupants.append(SURVIVOR_NAMES.get(survivor.get("id", ""), "幸存者"))
+	if not occupants.is_empty():
+		lines.append("当前位置：%s" % "、".join(occupants))
+	return "\n".join(lines)
 
 
 func _load_map() -> void:

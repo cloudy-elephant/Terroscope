@@ -1,6 +1,6 @@
 # Terrorscape: The Laboratory
 
-这是依据项目内已确认规格建立的 Godot 4 游戏工程。Milestone 0～5 已全部完成：实验室地图、38 张确认牌、固定角色与屠夫、完整权威规则、双方脱敏界面、局域网双人联机，以及教学提示、反馈、统计和快速重开。
+这是依据项目内已确认规格建立的 Godot 4 游戏工程。Milestone 0～5 已全部完成：实验室地图、38 张确认牌、固定角色与屠夫、完整权威规则、双方脱敏界面、局域网双人联机，以及教学提示、反馈、统计和快速重开。当前界面还包含中文角色名、四类折叠操作区、卡牌手牌与详情、弃牌区、路线箭头、门与封锁提示，以及按阵营隔离的叙事行动记录。
 
 ## 启动游戏
 
@@ -15,10 +15,10 @@
 安装与 Godot `4.7.2-stable` 匹配的 Windows x86_64 导出模板，并按 [`export_templates/README.md`](export_templates/README.md) 放置模板文件，然后执行：
 
 ```powershell
-& 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --headless --path . --export-release 'Windows x64' 'dist\Terrorscape-Laboratory-0.1.0-rc3-win64\Terrorscape-Laboratory.exe'
+& 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --headless --path . --export-release 'Windows x64' 'dist\Terrorscape-Laboratory-0.1.0-rc4-win64\Terrorscape-Laboratory.exe'
 ```
 
-游戏版本号为 `0.1.0`，当前测试候选包为 `rc3`。导出只包含运行游戏所需资源，不包含自动测试与开发沙盒。
+游戏版本号为 `0.1.0`，当前测试候选包为 `rc4`。导出只包含运行游戏所需资源，不包含自动测试与开发沙盒。
 
 ## 运行 Milestone 0 验收
 
@@ -66,4 +66,4 @@
 & 'C:\Users\admin\Desktop\Godot_v4.7.2-stable_win64.exe' --headless --path . --script res://tests/run_milestone_5.gd
 ```
 
-测试覆盖 38 张确认牌的数量、全部主动道具、工具箱、马尔科“装备齐全”、威廉“冲刺”、完整物品交换、终局统计、新手提示、声音与动画反馈，以及快速重开。Milestone 0～5 当前共 848 项自动断言，其中包括实物地图编号布局、开局一二步移动路线，以及待确认目的地区域闪烁的界面验收。
+测试覆盖 38 张确认牌的数量、全部主动道具、工具箱、马尔科“装备齐全”、威廉“冲刺”、完整物品交换、终局统计、新手提示、声音与动画反馈，以及快速重开。Milestone 0～5 当前共 872 项自动断言，其中包括实物地图编号布局、开局一二步移动路线、待确认目的地区域闪烁、四类操作区、手牌详情、悬停说明和阵营私有叙事记录的界面验收。

@@ -4,7 +4,7 @@ extends RefCounted
 const SeededRngScript = preload("res://core/seeded_rng.gd")
 
 const RULES_VERSION := "0.1.0"
-const CONTENT_VERSION := "0.5.0"
+const CONTENT_VERSION := "0.6.0"
 const SCHEMA_VERSION := "0.5.0"
 
 var data: Dictionary

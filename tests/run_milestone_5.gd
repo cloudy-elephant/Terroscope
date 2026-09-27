@@ -172,7 +172,9 @@ func _test_complete_item_exchange() -> void:
 
 func _test_public_stats() -> void:
 	var host = _new_host(530)
-	_accept(host, "BeginSurvivorActivation", "player_survivors", {"survivor_id":"anna_kubrick"})
+	_expect_eq(host.event_log[0].log_side, "system", "bootstrap narrative events are marked as neutral system records")
+	var survivor_result := _accept(host, "BeginSurvivorActivation", "player_survivors", {"survivor_id":"anna_kubrick"})
+	_expect(_all_events_have_log_side(survivor_result.events, "survivors"), "survivor command events are tagged for the survivor narrative log")
 	_accept(host, "Calm", "player_survivors", {"actor_id":"anna_kubrick"})
 	_expect_eq(host.state.data.stats.commands_accepted, 2, "accepted commands increment the match statistics")
 	_expect(not host.view_for_side("survivors").has("stats"), "live survivor view does not expose post-game statistics")
@@ -180,6 +182,10 @@ func _test_public_stats() -> void:
 	host.state.data.phase = "GAME_OVER"
 	_expect_eq(host.view_for_side("survivors").stats, host.view_for_side("killer").stats, "both projected views receive the same aggregate statistics")
 	_expect(not host.view_for_side("killer").has("rng_state"), "statistics do not weaken existing hidden-state projection")
+	var killer_host = _new_host(531)
+	killer_host.state.data.phase = "KILLER_FAST"
+	var killer_result := _accept(killer_host, "EndKillerFast", "player_killer", {})
+	_expect(_all_events_have_log_side(killer_result.events, "killer"), "killer command events are tagged for the killer narrative log")
 
 
 func _test_playable_guidance_and_feedback() -> void:
@@ -203,6 +209,21 @@ func _test_playable_guidance_and_feedback() -> void:
 	app.session.submit_command("BeginSurvivorActivation", {"survivor_id":"william_hooper"})
 	labels = _button_texts(app.action_list)
 	_expect(_contains_text(labels, "冲刺"), "William's original Sprint choices are exposed in the UI")
+	_expect_eq(app.action_category_containers.size(), 4, "the action panel is split into four compact categories")
+	for category_label: String in ["移动", "主要行动", "物品", "角色能力"]:
+		_expect(_contains_text(labels, category_label), "the action panel exposes the %s category" % category_label)
+	_expect(not app.info_label.text.contains("william_hooper"), "player-facing status replaces internal survivor ids with Chinese names")
+	_expect(app.info_label.text.contains("威廉"), "player-facing status shows William's Chinese name")
+	_expect(app.card_hand.get_child_count() > 0, "the survivor view renders a real card hand area")
+	var first_card: Button = app.card_hand.get_child(0)
+	_expect(not first_card.tooltip_text.is_empty(), "hand cards provide hover rule explanations")
+	_expect(app.discard_button.text.contains("弃牌区"), "the card zone exposes a dedicated discard pile")
+	var marco_medical_id: String = app.session.current_view.survivors[0].inventory_instance_ids[0]
+	app._show_card_detail("item", marco_medical_id, "马尔科")
+	_expect(app.card_detail_title.text == "马尔科的医疗包", "clicking a card opens its named detail view")
+	_expect(app.card_detail_text.text.contains("治疗"), "the card detail view contains executable rules text")
+	app.card_detail_popup.hide()
+	_expect(app.map_board._get_tooltip(app.map_board.room_rect("G1").get_center()).contains("电梯大厅"), "map regions provide hover explanations")
 	_expect(_contains_text(labels, "2 步：G3 医疗室 → G4 东侧过道"), "opening movement exposes the complete two-step route through G3")
 	_expect(_contains_text(labels, "2 步：B5 石英岩洞穴 → B4 发电机室"), "opening movement exposes the complete two-step route through B5")
 	app._queue_path_command("移动（1～2 步）", "MoveSurvivor", {"actor_id":"william_hooper"}, ["G3", "G4"])
@@ -213,6 +234,7 @@ func _test_playable_guidance_and_feedback() -> void:
 	_expect(app.map_board.destination_flash_phase != flash_before, "destination flashing advances over time")
 	app._cancel_pending_command()
 	_expect(app.map_board.pending_destination_room_id.is_empty(), "cancelling a pending route stops the destination flash")
+	_expect(app.map_board.pending_route.is_empty(), "cancelling also clears the route-arrow preview")
 	app._start_path_selection("冲刺", "UseSpecialAction", {"actor_id":"william_hooper","source_id":"william_sprint"}, "G1", 3, app.session.current_view.map.blocked_edge_ids)
 	_expect("G3" in app.map_board.highlighted_room_ids, "path selection highlights legal adjacent rooms")
 	app._on_room_clicked("G3")
@@ -231,6 +253,15 @@ func _test_playable_guidance_and_feedback() -> void:
 	_expect(app.action_list.get_child_count() < 50, "a repeat choice remains bounded after breaking a block")
 	app._cancel_brutal_selection()
 	_expect(app.pending_brutal_selection.is_empty(), "Brutal Rage path selection can be cancelled before host submission")
+	app._append_events([{"type":"ActorMoved","log_side":"survivors","payload":{"actor_id":"marco_carven","from":"G1","to":"G3"}}])
+	_expect(app.log_label.text.contains("马尔科从 G1 移动到 G3"), "developer events are translated into player-facing narrative text")
+	_expect(not app.log_label.text.contains("ActorMoved") and not app.log_label.text.contains("marco_carven"), "narrative records hide event types and internal ids")
+	app.session.set_debug_side("killer")
+	_expect(not app.log_label.text.contains("马尔科从 G1 移动到 G3"), "the killer log cannot see survivor-side records")
+	app._append_events([{"type":"ActorMoved","log_side":"killer","payload":{"actor_id":"butcher","from":"R1","to":"R2"}}])
+	_expect(app.log_label.text.contains("屠夫从 R1 移动到 R2"), "the killer receives only its own narrative record")
+	app.session.set_debug_side("survivors")
+	_expect(not app.log_label.text.contains("屠夫从 R1 移动到 R2"), "the survivor log cannot see killer-side records")
 	var ended_view: Dictionary = app.session.current_view.duplicate(true)
 	ended_view.phase = "GAME_OVER"
 	ended_view.winner = "survivors"
@@ -239,6 +270,7 @@ func _test_playable_guidance_and_feedback() -> void:
 	_expect(_contains_text(_button_texts(app.action_list), "快速重开"), "game-over screen exposes quick restart")
 	_expect(app.info_label.text.contains("本局统计"), "game-over screen displays numerical match statistics")
 	app.queue_free()
+	await process_frame
 
 
 func _give_item(host, survivor_id: String, definition_id: String) -> String:
@@ -304,11 +336,20 @@ func _has_event(events: Array, type: String) -> bool:
 	return not _event_of_type(events, type).is_empty()
 
 
+func _all_events_have_log_side(events: Array, side: String) -> bool:
+	for event: Dictionary in events:
+		if event.get("log_side", "") != side:
+			return false
+	return true
+
+
 func _button_texts(container: Container) -> Array[String]:
 	var result: Array[String] = []
 	for child: Node in container.get_children():
 		if child is Button:
 			result.append(child.text)
+		if child is Container:
+			result.append_array(_button_texts(child))
 	return result
 
 
